@@ -15,8 +15,8 @@ test('the 3D adventure renders, moves, accepts its story, and saves equipment', 
   await page.locator('#begin-btn').click(); await expect(page.getByRole('heading', { name: '장로 엘리온', exact: true })).toBeVisible();
   await page.locator('[data-dialogue-continue]').click();
   await expect(page.locator('#quest-content')).toContainText('작은 숲의 이상한 소문');
-  await page.keyboard.press('KeyI'); await page.locator('[data-equip="bow"]').click();
-  await expect(page.locator('[data-equip="bow"]')).toHaveClass(/equipped/);
+  await page.keyboard.press('KeyI'); await page.locator('[data-item="ranger_bow"]').click();
+  await expect(page.locator('[data-item="ranger_bow"]')).toHaveClass(/equipped/);
   await page.screenshot({ path: testInfo.outputPath('inventory.png'), animations: 'disabled' });
   await page.keyboard.press('Escape'); await page.reload();
   await expect(page.locator('#loading')).toHaveCount(0, { timeout: 30000 });
@@ -40,19 +40,34 @@ test('all advanced regions render, the dragon can be defeated, and the ending co
     await page.screenshot({ path: testInfo.outputPath(`${zone}.png`), animations: 'disabled' });
     expect(await page.evaluate(() => (window as any).__ELDERWOOD__.renderer.info.render.triangles)).toBeGreaterThan(1000);
   }
-  await page.evaluate(() => { const g = (window as any).__ELDERWOOD__; const boss = g.enemies[0]; g.hero.position.copy(boss.model.position); g.hero.position.z += 3; g.target = boss; });
-  await page.keyboard.press('Digit2'); await page.keyboard.press('KeyR'); await page.keyboard.press('KeyQ');
-  await page.keyboard.down('KeyJ');
-  for (let i = 0; i < 20; i++) {
-    await page.waitForTimeout(600);
-    const state = await page.evaluate(() => { const g = (window as any).__ELDERWOOD__; return { dead: g.enemies[0].hp <= 0, hp: g.state.hp }; });
-    if (state.dead) break;
-    if (state.hp < 180) await page.keyboard.press('KeyE');
-    if (state.hp < 120) await page.keyboard.press('KeyH');
-    if (i % 8 === 7) await page.keyboard.press('KeyQ');
+  // Exercise each boss phase with real keyboard attacks. Positioning is deterministic for this rendering/UI check.
+  await page.keyboard.press('Digit3'); const phases = new Set<number>();
+  for (let i = 0; i < 100; i++) {
+    const outcome = await page.evaluate(() => {
+      const g = (window as any).__ELDERWOOD__, boss = g.enemies[0];
+      if (boss.hp <= 0 || g.state.hp <= 0) return { dead: boss.hp <= 0, lost: g.state.hp <= 0, seal: false, phase: boss.bossPhase };
+      const needsSeal = boss.bossPhase === 3 && g.battle.exposure < 1;
+      if (needsSeal) {
+        const positions = [[-6,-6],[6,-6],[0,3]];
+        const index = g.battle.sealCooldowns.findIndex((t: number) => t <= 0);
+        if (index >= 0) g.hero.position.set(positions[index][0], 0, positions[index][1]);
+      } else { g.hero.position.copy(boss.model.position); g.hero.position.z += 8; }
+      g.target = boss; return { dead: false, lost: false, seal: needsSeal, phase: boss.bossPhase };
+    });
+    if (!phases.has(outcome.phase)) { phases.add(outcome.phase); await page.screenshot({ path: testInfo.outputPath(`dragon-phase-${outcome.phase}.png`), animations: 'disabled' }); expect(await page.evaluate(() => { const g = (window as any).__ELDERWOOD__; return g.camera.position.distanceTo(g.hero.position); })).toBeGreaterThan(3); }
+    if (outcome.dead) break;
+    expect(outcome.lost).toBe(false);
+    if (outcome.seal) await page.keyboard.press('KeyF');
+    await page.keyboard.down('KeyJ');
+    if (i % 12 === 0) await page.keyboard.press('KeyR');
+    if (i % 8 === 2) await page.keyboard.press('KeyQ');
+    if (i % 10 === 4) { await page.keyboard.press('KeyT'); await page.keyboard.press('KeyH'); }
+    await page.waitForTimeout(350);
   }
   await page.keyboard.up('KeyJ');
   await expect.poll(() => page.evaluate(() => (window as any).__ELDERWOOD__.state.kills.dragon)).toBe(1);
+  expect([...phases]).toEqual([1, 2, 3]);
+  console.log('BROWSER_BOSS', await page.evaluate(() => (window as any).__ELDERWOOD__.battle.metrics));
   await page.locator('[data-action="claim"]').click(); await page.locator('[data-next-chapter]').click(); await page.locator('button[data-travel="village"]').click();
   await page.evaluate(() => { (window as any).__ELDERWOOD__.hero.position.set(-2, 0, 7); });
   await page.keyboard.press('KeyF'); await expect(page.locator('#modal-title')).toHaveText('장로 엘리온');
@@ -95,7 +110,7 @@ test('combat grants XP, skills consume mana, death revives, and the shop equips 
   await page.keyboard.press('KeyQ'); await expect(page.locator('#cooldown-q')).not.toBeEmpty();
   const mp = await page.evaluate(() => (window as any).__ELDERWOOD__.state.mp); expect(mp).toBeLessThan(65);
   // A real AI strike delivers the final point of damage and exercises the revive UI.
-  await page.evaluate(() => { const g = (window as any).__ELDERWOOD__; const e = g.enemies.find((e: any) => e.hp > 0); g.state.hp = 1; g.hero.position.copy(e.model.position); g.hero.position.z += 1; e.cooldown = 0; });
+  await page.evaluate(() => { const g = (window as any).__ELDERWOOD__; const e = g.enemies.find((e: any) => e.hp > 0); e.mode = 'idle'; e.telegraph = undefined; g.state.hp = 1; g.hero.position.copy(e.model.position); g.hero.position.z += 1; e.cooldown = 0; });
   await expect(page.locator('[data-revive]')).toBeVisible({ timeout: 15000 }); await page.locator('[data-revive]').click();
   await expect(page.locator('#region-title')).toHaveText('그린헤이븐 마을');
   expect(await page.evaluate(() => (window as any).__ELDERWOOD__.state.totalKills)).toBeGreaterThan(0);

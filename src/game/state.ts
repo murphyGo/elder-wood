@@ -1,19 +1,7 @@
-export type Weapon = 'sword' | 'spear' | 'bow';
+import { WEAPONS, ITEMS, STARTER_ITEMS, DIFFICULTIES, getSkill, freshCooldowns, type Weapon, type Skill, type Difficulty, type ItemId, type Cooldowns } from './catalog';
+export * from './catalog';
 export type Zone = 'village' | 'forest' | 'plains' | 'depths' | 'sanctum';
 export type Species = 'squirrel' | 'rabbit' | 'cow' | 'horse' | 'hippo' | 'tiger' | 'shark' | 'dragon';
-export type Skill = 'q' | 'e' | 'r';
-
-export const WEAPONS = {
-  sword: { name: '여행자의 검', type: '한손검', attack: 8, range: 3.2, delay: 0.48, description: '빠르고 균형 잡힌 근접 무기', icon: 'sword' },
-  spear: { name: '수호자의 창', type: '장창', attack: 12, range: 4.8, delay: 0.72, description: '긴 사거리와 묵직한 일격', icon: 'spear' },
-  bow: { name: '숲지기의 활', type: '장궁', attack: 6, range: 17, delay: 0.65, description: '멀리 있는 적을 겨냥하는 무기', icon: 'bow' },
-} as const;
-
-export const SKILLS = {
-  q: { name: '회전 베기', level: 2, mana: 14, cooldown: 5, icon: 'whirl', description: '주변 5m의 모든 적에게 공격력의 220% 피해' },
-  e: { name: '숲의 치유', level: 3, mana: 22, cooldown: 10, icon: 'leaf', description: '최대 체력의 45%를 즉시 회복' },
-  r: { name: '별빛 낙하', level: 5, mana: 35, cooldown: 12, icon: 'spark', description: '주변 12m의 적에게 공격력의 380% 피해' },
-} as const;
 
 export const MONSTERS: Record<Species, { name: string; level: number; hp: number; attack: number; xp: number; gold: number; speed: number; size: number; zone: Zone }> = {
   squirrel: { name: '물든 다람쥐', level: 1, hp: 36, attack: 4, xp: 22, gold: 8, speed: 2.8, size: 0.7, zone: 'forest' },
@@ -23,7 +11,7 @@ export const MONSTERS: Record<Species, { name: string; level: number; hp: number
   hippo: { name: '바위등 하마', level: 5, hp: 230, attack: 20, xp: 140, gold: 42, speed: 1.8, size: 1.7, zone: 'plains' },
   tiger: { name: '흑월의 호랑이', level: 6, hp: 270, attack: 24, xp: 180, gold: 56, speed: 4.2, size: 1.25, zone: 'depths' },
   shark: { name: '심연의 상어', level: 7, hp: 330, attack: 28, xp: 220, gold: 65, speed: 3.2, size: 1.5, zone: 'depths' },
-  dragon: { name: '고대룡 모르가스', level: 10, hp: 1400, attack: 42, xp: 800, gold: 500, speed: 2.5, size: 3.2, zone: 'sanctum' },
+  dragon: { name: '고대룡 모르가스', level: 10, hp: 2800, attack: 48, xp: 800, gold: 500, speed: 2.5, size: 3.2, zone: 'sanctum' },
 };
 
 export const ZONES: Record<Zone, { name: string; english: string; subtitle: string; level: number; chapter: number; color: string; creatures: Species[] }> = {
@@ -45,17 +33,34 @@ export const CHAPTERS: { title: string; subtitle: string; description: string; z
 ];
 
 export interface SaveState {
-  version: 1; name: string; level: number; xp: number; hp: number; mp: number; gold: number;
+  version: 2; name: string; level: number; xp: number; hp: number; mp: number; gold: number;
   weapon: Weapon; armor: number; potions: number; chapter: number;
   kills: Partial<Record<Species, number>>; zone: Zone; totalKills: number;
-  muted: boolean; playTime: number;
+  muted: boolean; playTime: number; difficulty: Difficulty; ownedItems: ItemId[]; equipment: Record<Weapon, ItemId>; cooldowns: Cooldowns;
 }
-export const SAVE_KEY = 'elderwood-save-v1';
-export const newGame = (): SaveState => ({ version: 1, name: '여행자', level: 1, xp: 0, hp: 100, mp: 60, gold: 60, weapon: 'sword', armor: 0, potions: 5, chapter: 0, kills: {}, zone: 'village', totalKills: 0, muted: false, playTime: 0 });
+export const LEGACY_SAVE_KEY = 'elderwood-save-v1';
+export const SAVE_KEY = 'elderwood-save-v2';
+export const newGame = (): SaveState => ({ version: 2, name: '여행자', level: 1, xp: 0, hp: 100, mp: 60, gold: 60, weapon: 'sword', armor: 0, potions: 5, chapter: 0, kills: {}, zone: 'village', totalKills: 0, muted: false, playTime: 0, difficulty: 'adventure', ownedItems: Object.values(STARTER_ITEMS), equipment: { ...STARTER_ITEMS }, cooldowns: freshCooldowns() });
 export const xpRequired = (level: number) => Math.floor(60 * Math.pow(level, 1.4));
 export const maxHp = (s: SaveState) => 100 + (s.level - 1) * 28 + s.armor * 20;
 export const maxMp = (s: SaveState) => 60 + (s.level - 1) * 12;
-export const attackPower = (s: SaveState) => 10 + (s.level - 1) * 5 + WEAPONS[s.weapon].attack;
+export const equippedItem = (s: SaveState) => ITEMS[s.equipment[s.weapon]];
+export const attackPower = (s: SaveState) => 10 + (s.level - 1) * 5 + equippedItem(s).attack;
+export const mitigatedDamage = (raw: number, armor: number) => Math.max(1, Math.round(Math.max(0, raw) * 80 / (80 + Math.max(0, armor))));
+export function equipItem(s: SaveState, id: ItemId): boolean {
+  if (!Object.hasOwn(ITEMS, id) || !s.ownedItems.includes(id)) return false;
+  const item = ITEMS[id]; s.equipment[item.weapon] = id; s.weapon = item.weapon; return true;
+}
+export function buyItem(s: SaveState, id: ItemId): boolean {
+  if (!Object.hasOwn(ITEMS, id)) return false;
+  const item = ITEMS[id];
+  if (s.zone !== 'village' || s.chapter < item.chapter || s.gold < item.price || s.ownedItems.includes(id)) return false;
+  s.gold -= item.price; s.ownedItems.push(id); return true;
+}
+export function setDifficulty(s: SaveState, difficulty: Difficulty): boolean {
+  if (s.zone !== 'village' || !Object.hasOwn(DIFFICULTIES, difficulty)) return false;
+  s.difficulty = difficulty; return true;
+}
 export const defense = (s: SaveState) => (s.level - 1) * 1.5 + s.armor * 6;
 export const canTravel = (s: SaveState, zone: Zone) => s.chapter >= ZONES[zone].chapter && s.level >= ZONES[zone].level;
 export const questReady = (s: SaveState) => {
@@ -87,44 +92,56 @@ export function completeQuest(s: SaveState) {
 }
 export function usePotion(s: SaveState) {
   if (s.potions < 1 || s.hp >= maxHp(s)) return false;
-  s.potions--; s.hp = Math.min(maxHp(s), s.hp + maxHp(s) * 0.6);
+  s.potions--; s.hp = Math.min(maxHp(s), s.hp + maxHp(s) * 0.6 * DIFFICULTIES[s.difficulty].healing);
   return true;
 }
 export function useSkill(s: SaveState, skill: Skill, cooldown: number): string | null {
-  const data = SKILLS[skill];
+  const data = getSkill(s, skill);
   if (s.level < data.level) return `레벨 ${data.level}에 배울 수 있습니다.`;
   if (cooldown > 0) return '아직 스킬이 준비되지 않았습니다.';
   if (s.mp < data.mana) return '마력이 부족합니다.';
-  if (skill === 'e' && s.hp >= maxHp(s)) return '이미 체력이 가득 찼습니다.';
+  if (skill === 't' && s.hp >= maxHp(s)) return '이미 체력이 가득 찼습니다.';
   s.mp -= data.mana;
-  if (skill === 'e') s.hp = Math.min(maxHp(s), s.hp + maxHp(s) * 0.45);
+  if (skill === 't') s.hp = Math.min(maxHp(s), s.hp + maxHp(s) * 0.45 * DIFFICULTIES[s.difficulty].healing);
   return null;
 }
 export function buyPotion(s: SaveState) {
-  if (s.gold < 20) return false;
+  if (s.zone !== 'village' || s.gold < 20) return false;
   s.gold -= 20; s.potions++; return true;
 }
 export function upgradeArmor(s: SaveState) {
   const cost = 80 * (s.armor + 1);
-  if (s.armor >= 3 || s.gold < cost) return false;
+  if (s.zone !== 'village' || s.armor >= 3 || s.gold < cost) return false;
   s.gold -= cost; s.armor++; s.hp = Math.min(maxHp(s), s.hp + 20); return true;
 }
 export function parseSave(raw: string | null): SaveState {
   if (!raw) return newGame();
   try {
     const value = JSON.parse(raw);
-    if (!value || typeof value !== 'object' || value.version !== 1) return newGame();
+    if (!value || typeof value !== 'object' || (value.version !== 1 && value.version !== 2)) return newGame();
     const s = newGame();
     const number = (key: keyof SaveState, min: number, max: number, fallback: number) => typeof value[key] === 'number' && Number.isFinite(value[key]) ? Math.max(min, Math.min(max, value[key])) : fallback;
     s.level = Math.floor(number('level', 1, 50, 1)); s.armor = Math.floor(number('armor', 0, 3, 0));
     s.xp = Math.floor(number('xp', 0, xpRequired(s.level) - 1, 0));
-    s.hp = number('hp', 1, maxHp(s), maxHp(s)); s.mp = number('mp', 0, maxMp(s), maxMp(s));
+    s.hp = number('hp', 0, maxHp(s), maxHp(s)); s.mp = number('mp', 0, maxMp(s), maxMp(s));
     s.gold = Math.floor(number('gold', 0, 9999999, 60)); s.potions = Math.floor(number('potions', 0, 9999, 5));
     s.chapter = Math.floor(number('chapter', 0, CHAPTERS.length - 1, 0));
     s.totalKills = Math.floor(number('totalKills', 0, 999999, 0)); s.playTime = number('playTime', 0, 99999999, 0);
     if (Object.hasOwn(WEAPONS, value.weapon)) s.weapon = value.weapon;
     if (Object.hasOwn(ZONES, value.zone) && canTravel(s, value.zone)) s.zone = value.zone;
     s.muted = value.muted === true;
+    if (value.version === 2) {
+      if (Object.hasOwn(DIFFICULTIES, value.difficulty)) s.difficulty = value.difficulty;
+      if (Array.isArray(value.ownedItems)) s.ownedItems = [...new Set([...s.ownedItems, ...value.ownedItems.filter((id: unknown): id is ItemId => typeof id === 'string' && Object.hasOwn(ITEMS, id))])];
+      for (const weapon of Object.keys(WEAPONS) as Weapon[]) {
+        const id = value.equipment?.[weapon];
+        if (s.ownedItems.includes(id) && ITEMS[id as ItemId].weapon === weapon) s.equipment[weapon] = id;
+      }
+      for (const key of Object.keys(s.cooldowns) as (keyof Cooldowns)[]) {
+        const time = value.cooldowns?.[key];
+        if (typeof time === 'number' && Number.isFinite(time)) s.cooldowns[key] = Math.max(0, Math.min(60, time));
+      }
+    }
     for (const species of Object.keys(MONSTERS) as Species[]) {
       const count = value.kills?.[species];
       if (typeof count === 'number' && Number.isFinite(count)) s.kills[species] = Math.floor(Math.max(0, Math.min(count, 999999)));

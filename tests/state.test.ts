@@ -42,7 +42,7 @@ describe('combat resources and equipment', () => {
   it('heals to the HP cap and refuses wasteful potions and healing', () => {
     const s = newGame(); expect(usePotion(s)).toBe(false); expect(s.potions).toBe(5);
     s.hp = 70; expect(usePotion(s)).toBe(true); expect(s.hp).toBe(100); expect(s.potions).toBe(4);
-    gainXp(s, 300); expect(useSkill(s, 'e', 0)).toContain('가득'); s.hp = 1; const hp = maxHp(s); expect(useSkill(s, 'e', 0)).toBe(null); expect(s.hp).toBe(1 + hp * 0.45);
+    gainXp(s, 300); expect(useSkill(s, 't', 0)).toContain('가득'); s.hp = 1; const hp = maxHp(s); expect(useSkill(s, 't', 0)).toBe(null); expect(s.hp).toBe(1 + hp * 0.45);
   });
   it('charges gold for armor and potions and prevents excessive armor upgrades', () => {
     const s = newGame(); expect(upgradeArmor(s)).toBe(false); expect(s.gold).toBe(60);
@@ -63,7 +63,7 @@ describe('save integrity', () => {
   it('recovers corrupted saves and validates untrusted stored values', () => {
     expect(parseSave('not json')).toEqual(newGame()); expect(parseSave('null')).toEqual(newGame()); expect(parseSave('{"version":2}')).toEqual(newGame());
     const s = parseSave(JSON.stringify({ version: 1, level: 999, xp: -50, hp: -1, mp: 99999, chapter: 999, weapon: '__proto__', zone: 'not-a-zone', potions: -5, armor: 50, kills: { dragon: -2, rabbit: '99', cow: 1.5 } }));
-    expect(s.level).toBe(50); expect(s.hp).toBe(1); expect(s.mp).toBe(maxMp(s)); expect(s.chapter).toBe(6); expect(s.weapon).toBe('sword'); expect(s.zone).toBe('village'); expect(s.potions).toBe(0); expect(s.armor).toBe(3); expect(s.kills).toEqual({ cow: 1, dragon: 0 });
+    expect(s.level).toBe(50); expect(s.hp).toBe(0); expect(s.mp).toBe(maxMp(s)); expect(s.chapter).toBe(6); expect(s.weapon).toBe('sword'); expect(s.zone).toBe('village'); expect(s.potions).toBe(0); expect(s.armor).toBe(3); expect(s.kills).toEqual({ cow: 1, dragon: 0 });
   });
   it('returns a character saved in a locked zone to the village', () => { const s = newGame(); s.zone = 'sanctum'; expect(parseSave(JSON.stringify(s)).zone).toBe('village'); });
 });

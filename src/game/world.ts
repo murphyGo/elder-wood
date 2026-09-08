@@ -3,7 +3,7 @@ import { box, ico, cylinder, mesh, tree, house, batch } from './models';
 import type { Zone } from './state';
 
 export interface Obstacle { x: number; z: number; radius: number }
-export interface Landmark { x: number; z: number; name: string; kind: 'elder' | 'shop' | 'portal'; destination?: Zone }
+export interface Landmark { x: number; z: number; name: string; kind: 'elder' | 'shop' | 'portal' | 'seal'; destination?: Zone; index?: number }
 export interface Environment { group: T.Group; obstacles: Obstacle[]; landmarks: Landmark[]; portal: T.Group; particles: T.Points; water: T.Mesh; dark: boolean }
 export const terrainHeight = (x: number, z: number) => Math.sin(x * 0.14) * Math.cos(z * 0.13) * 0.24 + Math.sin(z * 0.19) * 0.12;
 export function random(seed: number) { let a = seed; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
