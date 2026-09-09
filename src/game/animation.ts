@@ -80,7 +80,7 @@ export function animateAnimal(root: T.Group, enemy: Enemy, dt: number, time: num
   }
   if (enemy.species === 'hippo' || enemy.species === 'cow') r.body.rotation.z = Math.sin(r.stride) * .045 * r.motion;
   if (enemy.species === 'tiger') r.body.position.y -= preparing ? .12 : 0;
-  if (enemy.species === 'shark') {
+  if (['shark', 'reef_shark', 'leviathan'].includes(enemy.species)) {
     r.tail.rotation.y = Math.sin(time * (moving ? 8 : 3)) * .38;
     r.body.rotation.z = Math.sin(time * 2) * .08;
     r.wings.forEach((wing, i) => { wing.rotation.z = Math.sin(time * 2) * .12 * (i ? -1 : 1); });
@@ -94,6 +94,6 @@ export function animateAnimal(root: T.Group, enemy: Enemy, dt: number, time: num
     r.neck.rotation.x = damp(r.neck.rotation.x, preparing ? -.2 : attacking ? .18 : 0, dt);
     r.tail.rotation.y = Math.sin(time * 1.4) * .25;
   }
-  r.altitude = damp(r.altitude, enemy.airborne ? 3.5 : enemy.species === 'shark' ? preparing ? -2.2 : .6 : 0, dt, enemy.species === 'shark' ? 9 : 3);
+  r.altitude = damp(r.altitude, enemy.airborne ? 3.5 : ['shark', 'reef_shark', 'leviathan'].includes(enemy.species) ? preparing && enemy.telegraph?.kind === 'eruption' ? -2.2 : .6 : 0, dt, ['shark', 'reef_shark', 'leviathan'].includes(enemy.species) ? 9 : 3);
   return r.altitude;
 }

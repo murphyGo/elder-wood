@@ -47,3 +47,28 @@
   .target-lock kbd { display:none; }
   .quality-options button { padding:12px; }
 }
+.material-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:9px; margin:16px 0; }
+.material-grid>div { display:flex; justify-content:space-between; gap:12px; padding:12px; background:#a3bfa514; border:1px solid var(--line); border-radius:4px; font-size:11px; }
+.material-grid b { color:#dcc38f; }
+.recipe-list { margin:22px 0; }
+.recipe-card { display:flex; gap:16px; padding:20px 0; border-bottom:1px solid var(--line); }
+.recipe-card>div:last-child { flex:1; min-width:0; }
+.recipe-card h3 { font-size:14px; color:#e5dbc0; }
+.recipe-card p { font-size:11px; line-height:1.7; color:#b8c5b4; margin:7px 0; }
+.recipe-card small { display:block; font-size:10px; color:#c9b995; line-height:1.6; margin-top:8px; }
+.recipe-cost { display:flex; gap:7px; flex-wrap:wrap; margin:12px 0; }
+.recipe-cost span { background:#c3caa112; color:#b8cba6; border-radius:3px; padding:5px 7px; font-size:10px; }
+.recipe-cost .missing { color:#dfa99c; }
+.supply-list { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+.side-story { margin:25px 0; padding:20px; border:1px solid #bcb18444; border-radius:5px; background:#b4b88d08; }
+.side-story h3 { font-size:16px; margin:8px 0; }
+.side-story p,.side-story small { color:#b9c5b0; font-size:11px; line-height:1.8; }
+.story-records details { border-bottom:1px solid var(--line); padding:14px 0; }
+.story-records summary { cursor:pointer; font-size:12px; color:#ded5b3; }
+.story-records p { font-size:11px; color:#b9c5b4; line-height:1.9; margin:12px 0; }
+.dialogue-text>p+p { margin-top:18px; }
+.tide-readout { display:flex; align-items:center; gap:7px; padding:9px 0; color:#b4d5dc; font-size:10px; }
+.tide-readout .icon { width:13px; height:13px; }
+.side-story-link { display:flex; align-items:center; gap:7px; width:100%; margin-top:14px; font-size:10px; color:#c3cda9; padding:10px 0 0; border-top:1px solid var(--line); text-align:left; }
+.side-story-link .icon { width:14px; height:14px; }
+@media(max-width:650px) { .recipe-card { gap:10px; }.recipe-card .detail-icon { width:34px; height:34px; }.recipe-card h3 { font-size:12px; }.recipe-card p { font-size:10px; }.material-grid>div { font-size:10px; padding:9px; }.recipe-cost span { font-size:9px; }.side-story { padding:14px; } }

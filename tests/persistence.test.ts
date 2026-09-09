@@ -28,7 +28,7 @@ describe('durable migration and recovery', () => {
     expect(repo.recover(result.legacy!)).toBe(true); expect([...store.data].filter(([key]) => key.startsWith(`${SAVE_KEY}-backup-`))[0][1]).toBe(bad);
     expect(repo.load().state.level).toBe(8);
   });
-  it('does not overwrite a damaged v1 or a corrupt v2 when backups fail', () => {
+  it('does not overwrite legacy or current saves when backups fail', () => {
     const store = new MemoryStore(); store.setItem(LEGACY_SAVE_KEY, 'broken'); store.setItem(SAVE_KEY, 'original');
     const repo = new SaveRepository(store); repo.load(); store.failWrites = true;
     expect(repo.recover(newGame())).toBe(false); expect(repo.locked).toBe(true); expect(store.getItem(SAVE_KEY)).toBe('original'); expect(store.getItem(LEGACY_SAVE_KEY)).toBe('broken');

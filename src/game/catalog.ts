@@ -19,6 +19,9 @@ export const ITEMS = {
   dragon_spear: { name: '용비늘 창', weapon: 'spear', attack: 18, price: 260, chapter: 4, effect: 'weaken', description: '관통 일격: 4초간 대상이 받는 피해 20% 증가. 중첩 없이 갱신.', color: '#c6a6de' },
   storm_bow: { name: '폭풍깃 활', weapon: 'bow', attack: 9, price: 240, chapter: 4, effect: 'chain', description: '충전 관통 사격: 처음 맞힌 적 주변 최대 2명에게 공격력 70% 번개.', color: '#a7cbe4' },
   frost_bow: { name: '서리사냥꾼의 활', weapon: 'bow', attack: 10, price: 100, chapter: 2, effect: 'frost', description: '도약 사격: 3초간 40% 둔화. 보스는 15% 둔화. 중첩 없이 갱신.', color: '#a6dadd' },
+  tide_sword: { name: '등대지기의 검', weapon: 'sword', attack: 24, price: 0, chapter: 6, effect: 'shield', description: '받아치기 성공: 체력 20% 보호막. 되찾은 조수의 심장으로 제작합니다.', color: '#8de0d7' },
+  tide_spear: { name: '해류의 삼지창', weapon: 'spear', attack: 28, price: 0, chapter: 6, effect: 'earth', description: '휩쓸기: 3초간 40% 둔화, 보스는 15%. 조수의 심장으로 제작합니다.', color: '#86cfc9' },
+  tide_bow: { name: '새벽바다의 활', weapon: 'bow', attack: 22, price: 0, chapter: 6, effect: 'frost', description: '도약 사격: 3초간 40% 둔화, 보스는 15%. 조수의 심장으로 제작합니다.', color: '#adcfe8' },
 } as const satisfies Record<string, { name: string; weapon: Weapon; attack: number; price: number; chapter: number; effect: ItemEffect; description: string; color: string }>;
 export type ItemId = keyof typeof ITEMS;
 export const STARTER_ITEMS: Record<Weapon, ItemId> = { sword: 'traveler_sword', spear: 'guardian_spear', bow: 'ranger_bow' };

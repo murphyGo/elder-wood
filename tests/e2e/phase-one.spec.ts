@@ -3,7 +3,7 @@ import { newGame } from '../../src/game/state';
 
 const progressed = () => ({ ...newGame(), level: 8, chapter: 4, gold: 2000, hp: 250, mp: 144, armor: 3, totalKills: 25, kills: { tiger: 2 }, playTime: 600 });
 async function start(page: Page, state = progressed()) {
-  await page.addInitScript(state => { if (!localStorage.getItem('elderwood-save-v2')) localStorage.setItem('elderwood-save-v2', JSON.stringify(state)); }, state);
+  await page.addInitScript(state => { if (!localStorage.getItem('elderwood-save-v3')) localStorage.setItem('elderwood-save-v3', JSON.stringify(state)); }, state);
   await page.goto('/'); await expect(page.locator('#loading')).toHaveCount(0, { timeout: 30000 });
 }
 
@@ -41,12 +41,12 @@ test('v1 migration preserves an ending and offers reward-free dragon practice', 
 
 test('corrupt saves stay intact until recovery is chosen; backup and old save remain', async ({ page }) => {
   const raw = JSON.stringify({ ...progressed(), version: 1 });
-  await page.addInitScript(raw => { localStorage.setItem('elderwood-save-v1', raw); localStorage.setItem('elderwood-save-v2', 'damaged-data'); }, raw);
+  await page.addInitScript(raw => { localStorage.setItem('elderwood-save-v1', raw); localStorage.setItem('elderwood-save-v3', 'damaged-data'); }, raw);
   await page.goto('/'); await expect(page.locator('#modal-title')).toHaveText('저장 기록 복구');
   await page.keyboard.press('Escape'); await expect(page.locator('#modal-title')).toHaveText('저장 기록 복구');
-  expect(await page.evaluate(() => localStorage.getItem('elderwood-save-v2'))).toBe('damaged-data');
+  expect(await page.evaluate(() => localStorage.getItem('elderwood-save-v3'))).toBe('damaged-data');
   await page.locator('[data-recover="legacy"]').click(); await expect(page.locator('#modal-backdrop')).toBeHidden();
-  const storage = await page.evaluate(() => ({ old:localStorage.getItem('elderwood-save-v1'), state:JSON.parse(localStorage.getItem('elderwood-save-v2')!), backups:Object.keys(localStorage).filter(k => k.startsWith('elderwood-save-v2-backup-')).map(k => localStorage.getItem(k)) }));
+  const storage = await page.evaluate(() => ({ old:localStorage.getItem('elderwood-save-v1'), state:JSON.parse(localStorage.getItem('elderwood-save-v3')!), backups:Object.keys(localStorage).filter(k => k.startsWith('elderwood-save-v3-backup-')).map(k => localStorage.getItem(k)) }));
   expect(storage.old).toBe(raw); expect(storage.state.level).toBe(8); expect(storage.backups).toContain('damaged-data');
 });
 

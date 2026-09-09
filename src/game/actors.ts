@@ -29,10 +29,10 @@ function bake(root: T.Group) {
   for(const [mat,list] of sets){if(list.length<2)continue;const geometries=list.map(m=>{m.updateMatrix();const g=m.geometry.clone().applyMatrix4(m.matrix);g.deleteAttribute('uv');const n=g.index?g.toNonIndexed():g;if(n!==g)g.dispose();return n;});const combined=mergeGeometries(geometries);geometries.forEach(g=>g.dispose());if(!combined)continue;for(const m of list){m.geometry.dispose();m.removeFromParent();}const m=new T.Mesh(combined,mat);m.castShadow=m.receiveShadow=true;root.add(m);}
 }
 export interface HumanRig { body:T.Group; legs:T.Group[]; knees:T.Group[]; arms:T.Group[]; elbows:T.Group[]; cape:T.Group; head:T.Group; hand:T.Group; armor:T.Group; shoulderArmor:T.Group[]; weapon?:T.Group; stride:number; motion:number; landing:number }
-export function character(npc=false, cloak=0x9b5141) {
+export function character(npc=false, cloak=0x9b5141, cloth=0x536a5c) {
   const root=new T.Group(); root.name=npc?'elder':'traveler'; const body=joint(root,'body');
   const legs:T.Group[]=[],knees:T.Group[]=[],arms:T.Group[]=[],elbows:T.Group[]=[],shoulderArmor:T.Group[]=[];
-  const cloth=0x536a5c,leather=0x493a2b,skin=0xd8ad83;
+  const leather=0x493a2b,skin=0xd8ad83;
   for(const side of [-1,1]){
     const leg=joint(body,`hip-${side}`,side*.17,.93,0);cylinder(leg,.145,.115,.42,cloth,0,-.2);const knee=joint(leg,`knee-${side}`,0,-.4,.01);
     cylinder(knee,.12,.105,.37,leather,0,-.17);ellipsoid(knee,0x352d26,0,-.4,.09,.145,.13,.24);cylinder(knee,.135,.13,.12,0x786041,0,-.04);legs.push(leg);knees.push(knee);
@@ -87,13 +87,14 @@ export function weaponModel(type:Weapon,id:ItemId=STARTER_ITEMS[type]){
     const guard=box(g,id==='ward_sword'?.63:.46,.09,.13,0xb79a57,0,.10);guard.material=surface(0xb79a57,true);for(const side of [-1,1]){const quillon=ico(g,.085,unique?accent:0xb79a57,side*(id==='ward_sword'?.3:.21),.12,0,1);quillon.scale.y=.5;}
     cylinder(g,.055,.06,.35,0x43332a,0,-.11);for(let i=0;i<5;i++)cylinder(g,.062,.062,.024,0x806a44,0,-.25+i*.06);ico(g,.10,unique?accent:0xb49a5d,0,-.32,0,1);
     if(id==='ember_sword')for(let i=0;i<4;i++){const rune=box(g,.027,.08,.01,accent,(i%2?1:-1)*.025,.5+i*.18,.056);rune.rotation.z=.35;rune.material=surface(accent,false,true);}
-    if(id==='ward_sword'){const stone=mesh(g,new T.OctahedronGeometry(.105),accent,0,.11,.11);stone.material=surface(accent,false,true);}
+    if(id==='ward_sword'||id==='tide_sword'){const stone=mesh(g,new T.OctahedronGeometry(.105),accent,0,.11,.11);stone.material=surface(accent,false,true);}
   }else if(type==='spear'){
     cylinder(g,.032,.05,2.7,0x6a4931,0,.28);for(const y of [-.55,-.32,.05,1.5]){const band=cylinder(g,.057,.057,.13,0xb29452,0,y);band.material=surface(0xb29452,true);}
     const head=mesh(g,new T.ConeGeometry(id==='dragon_spear'?.18:.13,.67,4),steel,0,1.95);head.material=surface(steel,true);head.scale.z=.48;
     if(unique){for(const side of [-1,1]){const barb=mesh(g,new T.ConeGeometry(.07,.39,4),accent,side*.12,1.70);barb.rotation.z=side*-.4;barb.material=surface(accent,true);}}
+    if(id==='tide_spear')for(const side of [-1,1]){link(g,[0,1.55,0],[side*.28,1.72,0],.04,steel,true);link(g,[side*.28,1.72,0],[side*.28,2.03,0],.035,steel,true);const tine=mesh(g,new T.ConeGeometry(.07,.30,4),accent,side*.28,2.12);tine.material=surface(accent,true);}
     if(id==='earth_spear')curve(g,[[.05,.55,0],[.10,.88,.02],[.05,1.18,.04],[-.05,1.38,0]],0x7d934e,.026);
-    if(id==='dragon_spear'){for(let i=0;i<3;i++)mesh(g,new T.OctahedronGeometry(.09),accent,0,1.30+i*.12,0);}
+    if(id==='dragon_spear'||id==='tide_spear'){for(let i=0;i<3;i++)mesh(g,new T.OctahedronGeometry(.09),accent,0,1.30+i*.12,0);}
   }else{
     curve(g,[[0,-.95,0],[0,-.68,.28],[0,0,.34],[0,.68,.28],[0,.95,0]],id==='frost_bow'?0x638d99:id==='storm_bow'?0x4e6677:0x8b6139,.055);
     const string=new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(0,-.94,0),new T.Vector3(0,0,0),new T.Vector3(0,.94,0)]),new T.LineBasicMaterial({color:unique?accent:0xe4d9af}));g.add(string);g.userData.string=string;g.position.z=-.30;
@@ -106,8 +107,8 @@ export function weaponModel(type:Weapon,id:ItemId=STARTER_ITEMS[type]){
 
 export interface AnimalRig {body:T.Group;legs:T.Group[];knees:T.Group[];head:T.Group;neck:T.Group;jaw:T.Group;tail:T.Group;wings:T.Group[];ears:T.Group[];stride:number;motion:number;altitude:number;species:Species}
 export function animal(type:Species){
-  const root=new T.Group();root.name=type;const body=joint(root,'body');const small=type==='squirrel'||type==='rabbit',dragon=type==='dragon',aquatic=type==='shark';
-  const colors:Record<Species,number>={squirrel:0xa96635,rabbit:0xe3ddc9,cow:0x927250,horse:0x725043,hippo:0x7e8c8c,tiger:0xd19744,shark:0x527c8b,dragon:0x465663};const color=colors[type];
+  const root=new T.Group();root.name=type;const body=joint(root,'body');const small=type==='squirrel'||type==='rabbit',dragon=type==='dragon',aquatic=['shark','reef_shark','leviathan'].includes(type);
+  const colors:Record<Species,number>={squirrel:0xa96635,rabbit:0xe3ddc9,cow:0x927250,horse:0x725043,hippo:0x7e8c8c,tiger:0xd19744,shark:0x527c8b,dragon:0x465663,reef_shark:0x527d82,leviathan:0x3e586e};const color=colors[type];
   const y=small?.43:type==='horse'?1.03:dragon?.88:.7;
   const width=small?.27:type==='hippo'?.62:type==='horse'?.37:.45, height=small?.29:type==='hippo'?.52:.47, length=small?.46:type==='hippo'?.87:dragon?1.02:.76;
   ellipsoid(body,color,0,y,0,width,height,length);ellipsoid(body,dragon?0xa69c78:aquatic?0xc0d1c7:small?0xe0c7a1:type==='tiger'?0xe8d1a0:color,0,y-.14,.12,width*.88,height*.62,length*.86);
@@ -129,7 +130,7 @@ export function animal(type:Species){
   const ears:T.Group[]=[];
   if(!aquatic)for(const side of [-1,1]){const ear=joint(head,`ear-${side}`,side*(small?.15:.25),small?.21:.25,-.06);const rabbit=type==='rabbit';ellipsoid(ear,color,0,rabbit?.25:.03,0,rabbit?.085:.105,rabbit?.32:.13,.075);ellipsoid(ear,rabbit?0xcdaca0:0xaf8b75,0,rabbit?.27:.04,.059,rabbit?.042:.06,rabbit?.23:.075,.02);ear.rotation.z=side*-.22;ears.push(ear);}
   if(type==='cow'||dragon)for(const side of [-1,1]){curve(head,[[side*.24,.19,-.13],[side*.43,.33,-.20],[side*.51,.56,-.30]],0xd7c596,.07);}
-  if(dragon||type==='hippo'||type==='shark')for(const side of [-1,1])for(let i=0;i<(dragon?3:2);i++){const tooth=mesh(jaw,new T.ConeGeometry(.04,.15,5),0xe4d8b8,side*(type==='hippo'?.32:.15),.06,.35+i*.075);if(type==='shark')tooth.rotation.x=Math.PI;}
+  if(dragon||type==='hippo'||aquatic)for(const side of [-1,1])for(let i=0;i<(dragon?3:2);i++){const tooth=mesh(jaw,new T.ConeGeometry(.04,.15,5),0xe4d8b8,side*(type==='hippo'?.32:.15),.06,.35+i*.075);if(aquatic)tooth.rotation.x=Math.PI;}
   const legs:T.Group[]=[],knees:T.Group[]=[];
   if(!aquatic)for(const x of [-1,1])for(const z of [-1,1]){
     const h=small?.32:type==='horse'?.85:dragon?.76:.53;const leg=joint(body,`leg-${x}-${z}`,x*width*.76,y-.08,z*length*.64);const thick=small?.083:type==='hippo'?.17:.12;
@@ -163,6 +164,14 @@ export function animal(type:Species){
       wing.rotation.x=-.48;wings.push(wing);
     }
     for(let i=0;i<6;i++){const spike=mesh(body,new T.ConeGeometry(.12,.35,4),0xb6b79b,0,1.32,-.84+i*.28);spike.rotation.x=-.2;}
+  }
+  if(type==='reef_shark'||type==='leviathan') {
+    const boss=type==='leviathan';
+    for(const side of [-1,1])for(let i=0;i<(boss?4:2);i++) {
+      const crystal=mesh(body,new T.OctahedronGeometry(boss?.19:.10),boss?0xad9ed6:0x9fd4c6,side*(boss?.35:.27),y+.3-i*.035,-.1-i*.23,0x34434e);
+      crystal.scale.set(.55,1.9,.55);crystal.rotation.z=side*-.35;
+    }
+    if(boss){ for(const side of [-1,1]) curve(head,[[side*.27,.15,-.15],[side*.38,.34,-.36],[side*.30,.42,-.57]],0xabb7c9,.05); }
   }
   root.userData={body,legs,knees,head,neck,jaw,tail,wings,ears,stride:0,motion:0,altitude:0,species:type} satisfies AnimalRig;bake(root);return root;
 }

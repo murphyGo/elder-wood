@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { newGame } from '../../src/game/state';
 
 async function start(page: Page) {
-  await page.addInitScript(state => { if (!localStorage.getItem('elderwood-save-v2')) localStorage.setItem('elderwood-save-v2', JSON.stringify(state)); }, { ...newGame(), level: 8, chapter: 4, armor: 3, gold: 1234, hp: 300, mp: 144 });
+  await page.addInitScript(state => { if (!localStorage.getItem('elderwood-save-v3')) localStorage.setItem('elderwood-save-v3', JSON.stringify(state)); }, { ...newGame(), level: 8, chapter: 4, armor: 3, gold: 1234, hp: 300, mp: 144 });
   await page.goto('/'); await expect(page.locator('#loading')).toHaveCount(0, { timeout: 30000 });
 }
 

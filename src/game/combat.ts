@@ -1,4 +1,5 @@
-import { MONSTERS, ZONES, DIFFICULTIES, WEAPONS, ITEMS, getSkill, equippedItem, attackPower, defense, mitigatedDamage, maxHp, maxMp, recordKill, questReady, useSkill, usePotion, type SaveState, type Species, type Zone, type Skill, type ItemId, type ItemEffect, type Weapon } from './state';
+import { MONSTERS, ZONES, DIFFICULTIES, WEAPONS, ITEMS, getSkill, equippedItem, attackPower, defense, mitigatedDamage, maxHp, maxMp, recordKill, questReady, useSkill, usePotion, isSafeZone, isSeaShark, isBoss, type SaveState, type Species, type Zone, type Skill, type ItemId, type ItemEffect, type Weapon } from './state';
+import { journeyReady, DROPS, MATERIALS, type MaterialId } from './journey';
 import { addPoint, angleTo, clearLine, copyPoint, direction, distance, inCone, moveBody, segmentDistance, segmentHitTime, type Point, type Obstacle } from './geometry';
 
 export type EnemyMode = 'idle' | 'approach' | 'prepare' | 'attack' | 'recover' | 'dead';
@@ -30,17 +31,17 @@ export class Combat {
   private projectileId = 0;
   constructor(public state: SaveState, public zone: Zone, public obstacles: Obstacle[], public practice = false) {
     const species = ZONES[zone].creatures;
-    const count = zone === 'village' ? 0 : zone === 'sanctum' ? (practice || state.chapter <= 4 ? 1 : 0) : 7;
+    const count = isSafeZone(zone) ? 0 : zone === 'sanctum' ? (practice || state.chapter <= 4 ? 1 : 0) : zone === 'abyss' ? (state.journey.step === 5 && !state.journey.flags.includes('leviathan_freed') ? 1 : 0) : 7;
     for (let i = 0; i < count; i++) {
       const type = species[i % species.length], data = MONSTERS[type];
-      const point = zone === 'sanctum' ? { x: 0, z: -7 } : { x: (i % 2 ? -1 : 1) * (4 + (i * 1.7 % 6)), z: 2 - Math.floor(i / 2) * 6 };
+      const point = isBoss(type) ? { x: 0, z: -7 } : { x: (i % 2 ? -1 : 1) * (4 + (i * 1.7 % 6)), z: (zone === 'wreck' ? -8 : 2) - Math.floor(i / 2) * (zone === 'wreck' ? 4 : 6) };
       const spawn = moveBody(point, { x: 0, z: 0 }, this.radius(type), obstacles);
       const hp = Math.round(data.hp * DIFFICULTIES[state.difficulty].hp);
       this.enemies.push({ id: i, species: type, pos: copyPoint(spawn), spawn, hp, maxHp: hp, facing: 0, mode: 'idle', timer: 0, cooldown: 1 + i * 0.1, windup: 0, dead: 0, phase: i * 2.4, flash: 0, chargeHit: false, attackIndex: 0, slow: 0, weakened: 0, bossPhase: 1, phaseTime: 0, airborne: false });
     }
   }
   get cooldowns() { return this.state.cooldowns; }
-  get boss() { return this.enemies.find(e => e.species === 'dragon' && e.hp > 0); }
+  get boss() { return this.enemies.find(e => isBoss(e.species) && e.hp > 0); }
   get busy() { return !!this.cast || this.parryTime > 0 || this.dodgeTime > 0; }
   get alive() { return this.state.hp > 0; }
   radius(species: Species) { return MONSTERS[species].size * 0.48; }
@@ -104,7 +105,7 @@ export class Combat {
       this.fx(this.player, ITEMS[item].effect === 'burn' ? '#edac73' : '#ecd69f', skill.range);
     } else if (skill.id === 'spear-sweep') {
       for (const e of this.enemies) if (this.canMelee(e) && inCone(this.player, e.pos, yaw, skill.range, skill.angle!, this.radius(e.species)) && clearLine(this.player, e.pos, this.obstacles)) {
-        if (this.hit(e, power * skill.multiplier, ITEMS[item].effect === 'earth' ? 'earth' : 'none', power) && e.species !== 'dragon') {
+        if (this.hit(e, power * skill.multiplier, ITEMS[item].effect === 'earth' ? 'earth' : 'none', power) && !isBoss(e.species)) {
           const d = direction(angleTo(this.player, e.pos)); this.move(e.pos, d.x * 2.4, d.z * 2.4, this.radius(e.species));
           if (e.hp > 0) { e.mode = 'recover'; e.timer = 0.55; e.telegraph = undefined; e.windup = 0; }
         }
@@ -137,13 +138,14 @@ export class Combat {
     this.projectiles = this.projectiles.filter(p => p.owner !== boss.id || p.friendly);
     this.fx(SEALS[index], '#cee8b5', 4); this.toast('봉인이 공명합니다! 8초 동안 용의 보호막이 해제됩니다.'); this.emit({ kind: 'sound', sound: 'level' }); return true;
   }
-  private canMelee(e: Enemy) { return e.hp > 0 && !e.airborne && !(e.species === 'shark' && e.mode === 'prepare'); }
-  private vulnerable(e: Enemy): boolean { return e.hp > 0 && !(e.species === 'dragon' && e.bossPhase === 2 && e.phaseTime < 1.8) && !(e.species === 'shark' && e.mode === 'prepare') && !(e.species === 'dragon' && e.bossPhase === 3 && this.exposure <= 0); }
+  private diving(e: Enemy) { return isSeaShark(e.species) && e.mode === 'prepare' && (e.species !== 'leviathan' || e.telegraph?.kind === 'eruption'); }
+  private canMelee(e: Enemy) { return e.hp > 0 && !e.airborne && !this.diving(e); }
+  private vulnerable(e: Enemy): boolean { return e.hp > 0 && !(e.species === 'dragon' && e.bossPhase === 2 && e.phaseTime < 1.8) && !this.diving(e) && !(e.species === 'dragon' && e.bossPhase === 3 && this.exposure <= 0); }
   hit(e: Enemy, raw: number, effect: ItemEffect = 'none', power = raw): boolean {
     if (!this.vulnerable(e)) return false;
     const damage = Math.max(1, Math.round(raw * (e.weakened > 0 ? 1.2 : 1)));
     // A single burst cannot skip flight or the seal mechanic, even on a high-level replay.
-    const floor = e.species === 'dragon' && e.bossPhase < 3 ? e.maxHp * (e.bossPhase === 1 ? 0.7 : 0.35) : 0;
+    const floor = e.species === 'leviathan' && e.bossPhase === 1 ? e.maxHp * .5 : e.species === 'dragon' && e.bossPhase < 3 ? e.maxHp * (e.bossPhase === 1 ? 0.7 : 0.35) : 0;
     const applied = Math.min(Math.max(0, e.hp - floor), damage); e.hp -= applied; e.flash = 0.18; this.metrics.damageDealt += applied; this.combatTime = 5;
     this.emit({ kind: 'float', text: String(Math.round(applied)), pos: copyPoint(e.pos), color: effect === 'burn' ? '#f0b077' : '#ffedbe' }); this.emit({ kind: 'sound', sound: 'hit' });
     if (e.hp <= 0) { this.kill(e); return true; }
@@ -151,6 +153,7 @@ export class Combat {
     if (effect === 'earth' || effect === 'frost') e.slow = 3;
     if (effect === 'weaken') e.weakened = 4;
     if (e.species === 'dragon') this.updateBossPhase(e);
+    if (e.species === 'leviathan') this.updateSeaBossPhase(e);
     return true;
   }
   private kill(e: Enemy) {
@@ -162,8 +165,9 @@ export class Combat {
     if (this.practice) { this.emit({ kind: 'practice', text: '연습전 완료 · 이야기와 보상은 그대로 유지됩니다.' }); return; }
     const levels = recordKill(this.state, e.species); const data = MONSTERS[e.species];
     this.emit({ kind: 'kill', text: `${data.name} 해방 · +${data.xp} EXP · +${data.gold} G` });
+    this.emit({ kind: 'toast', text: Object.entries(DROPS[e.species]).map(([key, amount]) => `${MATERIALS[key as MaterialId].name} +${amount}`).join(' · ') });
     if (levels) { this.emit({ kind: 'level', text: `레벨 ${this.state.level}` }); this.emit({ kind: 'sound', sound: 'level' }); this.fx(this.player, '#f0dda6', 3); }
-    if (questReady(this.state) && !this.questNotified) { this.questNotified = true; this.emit({ kind: 'quest' }); }
+    if ((questReady(this.state) || journeyReady(this.state)) && !this.questNotified) { this.questNotified = true; this.emit({ kind: 'quest' }); }
     this.persist();
   }
   hurt(raw: number, origin: Point, direct = true, attacker?: Enemy): number {
@@ -173,7 +177,7 @@ export class Combat {
       if (ITEMS[this.parryItem].effect === 'shield') { this.shield = maxHp(this.state) * 0.2; this.shieldTime = 5; }
       if (attacker?.hp && distance(this.player, attacker.pos) <= 4 + this.radius(attacker.species) && clearLine(this.player, attacker.pos, this.obstacles)) {
         this.hit(attacker, this.parryPower * 2.4);
-        if (attacker.hp > 0 && attacker.species !== 'dragon') { attacker.mode = 'recover'; attacker.timer = 1; attacker.telegraph = undefined; attacker.windup = 0; }
+        if (attacker.hp > 0 && !isBoss(attacker.species)) { attacker.mode = 'recover'; attacker.timer = 1; attacker.telegraph = undefined; attacker.windup = 0; }
       }
       return 0;
     }
@@ -205,7 +209,7 @@ export class Combat {
     this.updateProjectiles(dt);
     if (!this.alive) return;
     this.state.mp = Math.min(maxMp(this.state), this.state.mp + dt * (this.combatTime ? 1.5 : 4));
-    if (!this.combatTime) this.state.hp = Math.min(maxHp(this.state), this.state.hp + dt * (this.zone === 'village' ? 12 : 2.5) * DIFFICULTIES[this.state.difficulty].healing);
+    if (!this.combatTime) this.state.hp = Math.min(maxHp(this.state), this.state.hp + dt * (isSafeZone(this.zone) ? 12 : 2.5) * DIFFICULTIES[this.state.difficulty].healing);
   }
   private updateCast(dt: number) {
     const c = this.cast; if (!c) return;
@@ -259,6 +263,12 @@ export class Combat {
   }
 
   // Enemy state machines and their committed attack shapes follow below.
+  private updateSeaBossPhase(e: Enemy) {
+    if (e.hp > e.maxHp * .5 || e.bossPhase === 2) return;
+    e.bossPhase = 2; e.phaseTime = 0; e.mode = 'recover'; e.timer = 2; e.telegraph = undefined; e.windup = 0;
+    this.projectiles = this.projectiles.filter(p => p.friendly || p.owner !== e.id);
+    this.emit({ kind: 'phase', text: '네리스 2단계 · 깊어진 검은 조수! 잠행 범위를 피하고 수면 위로 돌아올 때 공격하세요.' });
+  }
   private updateBossPhase(e: Enemy) {
     const phase = e.hp / e.maxHp <= 0.35 ? 3 : e.hp / e.maxHp <= 0.7 ? 2 : 1;
     if (phase === e.bossPhase) return;
@@ -270,7 +280,7 @@ export class Combat {
     const data = MONSTERS[e.species];
     if (e.mode === 'dead') {
       e.dead -= dt;
-      if (e.dead <= 0 && e.species !== 'dragon') { e.hp = e.maxHp; Object.assign(e.pos, e.spawn); e.mode = 'idle'; e.cooldown = 2; e.slow = 0; e.weakened = 0; e.timer = 0; }
+      if (e.dead <= 0 && !isBoss(e.species)) { e.hp = e.maxHp; Object.assign(e.pos, e.spawn); e.mode = 'idle'; e.cooldown = 2; e.slow = 0; e.weakened = 0; e.timer = 0; }
       return;
     }
     e.flash = Math.max(0, e.flash - dt); e.slow = Math.max(0, e.slow - dt); e.weakened = Math.max(0, e.weakened - dt);
@@ -282,7 +292,8 @@ export class Combat {
     }
     e.phaseTime += dt;
     if (e.species === 'dragon') { this.updateBossPhase(e); e.airborne = e.bossPhase === 2 && e.phaseTime % 12 < 5; }
-    const gap = distance(e.pos, this.player); const speed = data.speed * (e.slow ? e.species === 'dragon' ? 0.85 : 0.6 : 1);
+    if (e.species === 'leviathan') this.updateSeaBossPhase(e);
+    const gap = distance(e.pos, this.player); const speed = data.speed * (e.slow ? isBoss(e.species) ? 0.85 : 0.6 : 1);
     e.cooldown = Math.max(0, e.cooldown - dt);
     if (e.mode === 'prepare') {
       e.timer = Math.max(0, e.timer - dt); e.windup = e.timer;
@@ -299,10 +310,10 @@ export class Combat {
       return;
     }
     if (e.mode === 'recover') { e.timer -= dt; if (e.timer <= 0) { e.mode = 'idle'; e.cooldown = 0.3; } return; }
-    const aggro = e.species === 'dragon' ? 25 : 10.5;
+    const aggro = isBoss(e.species) ? 25 : 10.5;
     if (gap < aggro) {
       this.combatTime = Math.max(this.combatTime, 1); e.mode = 'approach'; e.facing = angleTo(e.pos, this.player);
-      const desired = e.species === 'squirrel' ? 8 : e.species === 'dragon' ? (e.airborne ? 11 : 4) : e.species === 'cow' || e.species === 'horse' ? 5 : e.species === 'tiger' || e.species === 'shark' || e.species === 'rabbit' ? 4.5 : 2.8;
+      const desired = e.species === 'squirrel' ? 8 : e.species === 'dragon' ? (e.airborne ? 11 : 4) : e.species === 'leviathan' ? 9 : e.species === 'cow' || e.species === 'horse' ? 5 : e.species === 'tiger' || isSeaShark(e.species) || e.species === 'rabbit' ? 4.5 : 2.8;
       if (gap <= desired + 1 && e.cooldown <= 0 && clearLine(e.pos, this.player, this.obstacles)) { this.prepareEnemy(e); return; }
       let yaw = e.facing;
       if (e.species === 'squirrel' && gap < 4) yaw += Math.PI;
@@ -326,7 +337,12 @@ export class Combat {
       label = e.species === 'tiger' ? '그림자 도약' : e.species === 'rabbit' ? '도약 돌진' : '돌진';
     }
     if (e.species === 'hippo') { if (index % 2) { shape = 'circle'; range = 4.8; prep = 1.15; label = '대지 충격파'; } else { range = 3.8; prep = 0.85; } }
-    if (e.species === 'shark') { shape = 'circle'; kind = 'eruption'; range = 2.4; origin = copyPoint(this.player); prep = 1.1; label = '심연의 돌출'; }
+    if (isSeaShark(e.species)) { shape = 'circle'; kind = 'eruption'; range = 2.4; origin = copyPoint(this.player); prep = 1.1; label = '심연의 돌출'; }
+    if (e.species === 'leviathan') {
+      if (index % 3 === 0) { shape = 'line'; kind = 'charge'; origin = copyPoint(e.pos); range = 11; width = 1.5; prep = 1.35; label = '흑조 돌진'; }
+      else if (index % 3 === 1) { shape = 'circle'; kind = 'eruption'; range = e.bossPhase === 2 ? 4.2 : 3.2; prep = e.bossPhase === 2 ? 1.1 : 1.4; label = '검은 조수 · 잠행'; }
+      else { shape = 'cone'; kind = 'melee'; origin = copyPoint(e.pos); range = 7; angle = 160; prep = 1.1; label = '수호자의 꼬리'; }
+    }
     if (e.species === 'dragon') {
       if (e.airborne || (e.bossPhase >= 2 && index % 2)) { shape = 'line'; kind = 'fire'; range = 16; width = 1.9; prep = 1.3; label = '화염 숨결'; }
       else if (index % 2) { shape = 'circle'; range = 6; prep = 1.2; label = '꼬리 휩쓸기'; }
@@ -355,7 +371,7 @@ export class Combat {
   private recoverEnemy(e: Enemy) {
     if (e.hp <= 0) return;
     const chained = this.state.difficulty === 'veteran' && ['horse', 'tiger', 'dragon'].includes(e.species) && e.attackIndex % 2 === 1;
-    e.mode = 'recover'; e.timer = (chained ? 0.35 : e.species === 'dragon' ? 1.65 : 1.5) * DIFFICULTIES[this.state.difficulty].recovery;
+    e.mode = 'recover'; e.timer = (e.species === 'leviathan' ? 2.8 : chained ? 0.35 : e.species === 'dragon' ? 1.65 : 1.5) * DIFFICULTIES[this.state.difficulty].recovery;
     e.telegraph = undefined; e.windup = 0; e.cooldown = 0;
   }
 }

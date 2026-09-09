@@ -1,7 +1,8 @@
+import { newJourney, addMaterials, emptyMaterials, MATERIALS, STORY_FLAGS, DROPS, CRAFTED_ITEMS, type JourneyState, type MaterialId, type StoryFlag, type Rune } from './journey-data';
 import { WEAPONS, ITEMS, STARTER_ITEMS, DIFFICULTIES, getSkill, freshCooldowns, type Weapon, type Skill, type Difficulty, type ItemId, type Cooldowns } from './catalog';
 export * from './catalog';
-export type Zone = 'village' | 'forest' | 'plains' | 'depths' | 'sanctum';
-export type Species = 'squirrel' | 'rabbit' | 'cow' | 'horse' | 'hippo' | 'tiger' | 'shark' | 'dragon';
+export type Zone = 'village' | 'forest' | 'plains' | 'depths' | 'sanctum' | 'harbor' | 'wreck' | 'abyss';
+export type Species = 'squirrel' | 'rabbit' | 'cow' | 'horse' | 'hippo' | 'tiger' | 'shark' | 'dragon' | 'reef_shark' | 'leviathan';
 
 export const MONSTERS: Record<Species, { name: string; level: number; hp: number; attack: number; xp: number; gold: number; speed: number; size: number; zone: Zone }> = {
   squirrel: { name: '물든 다람쥐', level: 1, hp: 36, attack: 4, xp: 22, gold: 8, speed: 2.8, size: 0.7, zone: 'forest' },
@@ -11,8 +12,14 @@ export const MONSTERS: Record<Species, { name: string; level: number; hp: number
   hippo: { name: '바위등 하마', level: 5, hp: 230, attack: 20, xp: 140, gold: 42, speed: 1.8, size: 1.7, zone: 'plains' },
   tiger: { name: '흑월의 호랑이', level: 6, hp: 270, attack: 24, xp: 180, gold: 56, speed: 4.2, size: 1.25, zone: 'depths' },
   shark: { name: '심연의 상어', level: 7, hp: 330, attack: 28, xp: 220, gold: 65, speed: 3.2, size: 1.5, zone: 'depths' },
+  reef_shark: { name: '별에 물든 암초상어', level: 9, hp: 520, attack: 32, xp: 260, gold: 75, speed: 3.4, size: 1.65, zone: 'wreck' },
+  leviathan: { name: '검은 조수의 네리스', level: 12, hp: 3800, attack: 58, xp: 1600, gold: 650, speed: 3, size: 2.8, zone: 'abyss' },
   dragon: { name: '고대룡 모르가스', level: 10, hp: 2800, attack: 48, xp: 800, gold: 500, speed: 2.5, size: 3.2, zone: 'sanctum' },
 };
+
+export const isSafeZone = (zone: Zone) => zone === 'village' || zone === 'harbor';
+export const isSeaShark = (species: Species) => ['shark', 'reef_shark', 'leviathan'].includes(species);
+export const isBoss = (species: Species) => species === 'dragon' || species === 'leviathan';
 
 export const ZONES: Record<Zone, { name: string; english: string; subtitle: string; level: number; chapter: number; color: string; creatures: Species[] }> = {
   village: { name: '그린헤이븐 마을', english: 'GREENHAVEN VILLAGE', subtitle: '모든 모험에는, 돌아올 곳이 필요하다.', level: 1, chapter: 0, color: '#abc4a0', creatures: [] },
@@ -20,6 +27,9 @@ export const ZONES: Record<Zone, { name: string; english: string; subtitle: stri
   plains: { name: '거인의 들판', english: 'FIELDS OF THE GIANTS', subtitle: '대지의 거인들이 평화를 잃은 곳.', level: 3, chapter: 2, color: '#cbb880', creatures: ['cow', 'horse', 'hippo'] },
   depths: { name: '잠긴 신전', english: 'THE DROWNED TEMPLE', subtitle: '가라앉은 신전, 깨어나는 그림자.', level: 5, chapter: 3, color: '#9bbed0', creatures: ['tiger', 'shark'] },
   sanctum: { name: '용의 안식처', english: 'SANCTUM OF THE DRAGON', subtitle: '마지막 별빛이 당신을 기다린다.', level: 8, chapter: 4, color: '#c3a0ce', creatures: ['dragon'] },
+  harbor: { name: '새벽물결 항구', english: 'DAWNTIDE HARBOR', subtitle: '돌아오지 않은 배들을 기다리는 불빛.', level: 8, chapter: 6, color: '#b3d4ce', creatures: [] },
+  wreck: { name: '별무덤 난파선', english: 'THE STARFALL WRECK', subtitle: '물이 물러나면, 잃어버린 발자국이 드러난다.', level: 8, chapter: 6, color: '#b8b3a0', creatures: ['reef_shark', 'tiger'] },
+  abyss: { name: '검은 조수의 제단', english: 'ALTAR OF THE BLACK TIDE', subtitle: '바다의 심장은 아직 약속을 기억한다.', level: 10, chapter: 6, color: '#92c8d1', creatures: ['leviathan'] },
 };
 
 export const CHAPTERS: { title: string; subtitle: string; description: string; zone: Zone; objectives: Partial<Record<Species, number>>; xp: number; gold: number }[] = [
@@ -33,14 +43,16 @@ export const CHAPTERS: { title: string; subtitle: string; description: string; z
 ];
 
 export interface SaveState {
-  version: 2; name: string; level: number; xp: number; hp: number; mp: number; gold: number;
+  version: 3; name: string; level: number; xp: number; hp: number; mp: number; gold: number;
   weapon: Weapon; armor: number; potions: number; chapter: number;
   kills: Partial<Record<Species, number>>; zone: Zone; totalKills: number;
+  journey: JourneyState; materials: Record<MaterialId, number>;
   muted: boolean; playTime: number; difficulty: Difficulty; ownedItems: ItemId[]; equipment: Record<Weapon, ItemId>; cooldowns: Cooldowns;
 }
 export const LEGACY_SAVE_KEY = 'elderwood-save-v1';
-export const SAVE_KEY = 'elderwood-save-v2';
-export const newGame = (): SaveState => ({ version: 2, name: '여행자', level: 1, xp: 0, hp: 100, mp: 60, gold: 60, weapon: 'sword', armor: 0, potions: 5, chapter: 0, kills: {}, zone: 'village', totalKills: 0, muted: false, playTime: 0, difficulty: 'adventure', ownedItems: Object.values(STARTER_ITEMS), equipment: { ...STARTER_ITEMS }, cooldowns: freshCooldowns() });
+export const PREVIOUS_SAVE_KEY = 'elderwood-save-v2';
+export const SAVE_KEY = 'elderwood-save-v3';
+export const newGame = (): SaveState => ({ version: 3, journey: newJourney(), materials: emptyMaterials(), name: '여행자', level: 1, xp: 0, hp: 100, mp: 60, gold: 60, weapon: 'sword', armor: 0, potions: 5, chapter: 0, kills: {}, zone: 'village', totalKills: 0, muted: false, playTime: 0, difficulty: 'adventure', ownedItems: Object.values(STARTER_ITEMS), equipment: { ...STARTER_ITEMS }, cooldowns: freshCooldowns() });
 export const xpRequired = (level: number) => Math.floor(60 * Math.pow(level, 1.4));
 export const maxHp = (s: SaveState) => 100 + (s.level - 1) * 28 + s.armor * 20;
 export const maxMp = (s: SaveState) => 60 + (s.level - 1) * 12;
@@ -54,15 +66,22 @@ export function equipItem(s: SaveState, id: ItemId): boolean {
 export function buyItem(s: SaveState, id: ItemId): boolean {
   if (!Object.hasOwn(ITEMS, id)) return false;
   const item = ITEMS[id];
-  if (s.zone !== 'village' || s.chapter < item.chapter || s.gold < item.price || s.ownedItems.includes(id)) return false;
+  if (CRAFTED_ITEMS.includes(id)) return false;
+  if (!isSafeZone(s.zone) || s.chapter < item.chapter || s.gold < item.price || s.ownedItems.includes(id)) return false;
   s.gold -= item.price; s.ownedItems.push(id); return true;
 }
 export function setDifficulty(s: SaveState, difficulty: Difficulty): boolean {
-  if (s.zone !== 'village' || !Object.hasOwn(DIFFICULTIES, difficulty)) return false;
+  if (!isSafeZone(s.zone) || !Object.hasOwn(DIFFICULTIES, difficulty)) return false;
   s.difficulty = difficulty; return true;
 }
 export const defense = (s: SaveState) => (s.level - 1) * 1.5 + s.armor * 6;
-export const canTravel = (s: SaveState, zone: Zone) => s.chapter >= ZONES[zone].chapter && s.level >= ZONES[zone].level;
+export const canTravel = (s: SaveState, zone: Zone) => {
+  if (!Object.hasOwn(ZONES, zone) || s.chapter < ZONES[zone].chapter || s.level < ZONES[zone].level) return false;
+  if (zone === 'harbor') return s.journey.step >= 1;
+  if (zone === 'wreck') return s.journey.step >= 3 && s.journey.flags.includes('lantern');
+  if (zone === 'abyss') return s.journey.step >= 5 && s.journey.flags.includes('beacon');
+  return true;
+};
 export const questReady = (s: SaveState) => {
   const objectives = Object.entries(CHAPTERS[s.chapter].objectives);
   return objectives.length > 0 && objectives.every(([id, count]) => (s.kills[id as Species] ?? 0) >= count!);
@@ -81,6 +100,8 @@ export function gainXp(s: SaveState, amount: number): number {
 export function recordKill(s: SaveState, species: Species) {
   s.totalKills++; s.kills[species] = (s.kills[species] ?? 0) + 1;
   s.gold += MONSTERS[species].gold;
+  addMaterials(s.materials, DROPS[species]);
+  if (species === 'leviathan' && s.journey.step === 5 && !s.journey.flags.includes('leviathan_freed')) s.journey.flags.push('leviathan_freed');
   return gainXp(s, MONSTERS[species].xp);
 }
 export function completeQuest(s: SaveState) {
@@ -106,19 +127,19 @@ export function useSkill(s: SaveState, skill: Skill, cooldown: number): string |
   return null;
 }
 export function buyPotion(s: SaveState) {
-  if (s.zone !== 'village' || s.gold < 20) return false;
+  if (!isSafeZone(s.zone) || s.gold < 20) return false;
   s.gold -= 20; s.potions++; return true;
 }
 export function upgradeArmor(s: SaveState) {
   const cost = 80 * (s.armor + 1);
-  if (s.zone !== 'village' || s.armor >= 3 || s.gold < cost) return false;
+  if (!isSafeZone(s.zone) || s.armor >= 3 || s.gold < cost) return false;
   s.gold -= cost; s.armor++; s.hp = Math.min(maxHp(s), s.hp + 20); return true;
 }
 export function parseSave(raw: string | null): SaveState {
   if (!raw) return newGame();
   try {
     const value = JSON.parse(raw);
-    if (!value || typeof value !== 'object' || (value.version !== 1 && value.version !== 2)) return newGame();
+    if (!value || typeof value !== 'object' || ![1, 2, 3].includes(value.version)) return newGame();
     const s = newGame();
     const number = (key: keyof SaveState, min: number, max: number, fallback: number) => typeof value[key] === 'number' && Number.isFinite(value[key]) ? Math.max(min, Math.min(max, value[key])) : fallback;
     s.level = Math.floor(number('level', 1, 50, 1)); s.armor = Math.floor(number('armor', 0, 3, 0));
@@ -128,9 +149,8 @@ export function parseSave(raw: string | null): SaveState {
     s.chapter = Math.floor(number('chapter', 0, CHAPTERS.length - 1, 0));
     s.totalKills = Math.floor(number('totalKills', 0, 999999, 0)); s.playTime = number('playTime', 0, 99999999, 0);
     if (Object.hasOwn(WEAPONS, value.weapon)) s.weapon = value.weapon;
-    if (Object.hasOwn(ZONES, value.zone) && canTravel(s, value.zone)) s.zone = value.zone;
     s.muted = value.muted === true;
-    if (value.version === 2) {
+    if (value.version >= 2) {
       if (Object.hasOwn(DIFFICULTIES, value.difficulty)) s.difficulty = value.difficulty;
       if (Array.isArray(value.ownedItems)) s.ownedItems = [...new Set([...s.ownedItems, ...value.ownedItems.filter((id: unknown): id is ItemId => typeof id === 'string' && Object.hasOwn(ITEMS, id))])];
       for (const weapon of Object.keys(WEAPONS) as Weapon[]) {
@@ -142,6 +162,19 @@ export function parseSave(raw: string | null): SaveState {
         if (typeof time === 'number' && Number.isFinite(time)) s.cooldowns[key] = Math.max(0, Math.min(60, time));
       }
     }
+    if (value.version === 3) {
+      const j = value.journey;
+      if (j && typeof j === 'object') {
+        s.journey.step = s.chapter === 6 && Number.isInteger(j.step) ? Math.max(0, Math.min(7, j.step)) : 0;
+        s.journey.flags = Array.isArray(j.flags) ? [...new Set(j.flags.filter((f: unknown): f is StoryFlag => typeof f === 'string' && STORY_FLAGS.includes(f)))] as StoryFlag[] : [];
+        s.journey.runes = Array.isArray(j.runes) && j.runes.length <= 3 && j.runes.every((r: unknown, i: number) => r === ['shell', 'moon', 'star'][i]) ? [...j.runes] as Rune[] : [];
+        s.journey.tide = j.tide === 'low' && s.journey.flags.includes('lantern') ? 'low' : 'high';
+      }
+      for (const key of Object.keys(MATERIALS) as MaterialId[]) {
+        const amount = value.materials?.[key]; if (typeof amount === 'number' && Number.isFinite(amount)) s.materials[key] = Math.floor(Math.max(0, Math.min(999999, amount)));
+      }
+    }
+    if (Object.hasOwn(ZONES, value.zone) && canTravel(s, value.zone)) s.zone = value.zone;
     for (const species of Object.keys(MONSTERS) as Species[]) {
       const count = value.kills?.[species];
       if (typeof count === 'number' && Number.isFinite(count)) s.kills[species] = Math.floor(Math.max(0, Math.min(count, 999999)));

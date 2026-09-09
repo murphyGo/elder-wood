@@ -1,6 +1,7 @@
 import * as T from 'three';
 import { character, animal, weaponModel, dressArmor, material } from './models';
-import { createEnvironment, disposeEnvironment, animateEnvironment, terrainHeight, type Environment, type Landmark } from './world';
+import { createEnvironment, disposeEnvironment, animateEnvironment, refreshCoast, terrainHeight, type Environment, type Landmark } from './world';
+import { STORY_SITES, activeSite, interactStory, beginJourney, craft, buyMaterial, craftingProblem, journeyReady, type RecipeId, type MaterialId, type StoryId, type StoryResult } from './journey';
 import { animateHuman, animateAnimal } from './animation';
 import { FollowCamera } from './camera';
 import { ImpactParticles, contactShadow } from './effects';
@@ -11,7 +12,7 @@ import { SaveRepository, type LoadResult } from './persistence';
 import { type Point } from './geometry';
 
 export interface Enemy extends CombatEnemy { model: T.Group; ring: T.Mesh; shadow: T.Group; previous: Point }
-export type GameEvent = { type: 'toast' | 'level' | 'kill' | 'death' | 'zone' | 'interact' | 'quest' | 'saved' | 'phase' | 'practice'; text?: string; landmark?: Landmark; good?: boolean };
+export type GameEvent = { type: 'toast' | 'level' | 'kill' | 'death' | 'zone' | 'interact' | 'quest' | 'saved' | 'phase' | 'practice' | 'story'; text?: string; landmark?: Landmark; good?: boolean };
 export interface Hooks { update: () => void; event: (event: GameEvent) => void; float: (text: string, position: T.Vector3, color: string) => void }
 
 class Sound {
@@ -40,6 +41,7 @@ export class Game {
   environment!: Environment; hero = character(); enemies: Enemy[] = []; npcs: T.Group[] = [];
   keys = new Set<string>(); sound = new Sound(); paused = false; running = true;
   battle!: Combat; nearby?: Landmark; repository: SaveRepository; loadResult: LoadResult;
+  storyResult?: StoryResult;
   get target() { return this.enemies.find(e => e.id === this.battle?.targetId); }
   set target(e: Enemy | undefined) { if (this.battle) { this.battle.targetId = e?.id; if (this.battle.lockedTargetId !== undefined) this.battle.lockedTargetId = e?.id; } }
   get lockedTarget() { return this.enemies.find(e => e.id === this.battle?.lockedTargetId && e.hp > 0); }
@@ -156,7 +158,7 @@ export class Game {
     this.projectileViews.forEach(m => this.removeModel(m)); this.projectileViews.clear();
     this.telegraphViews.forEach(v => this.removeModel(v.mesh)); this.telegraphViews.clear();
     this.effects.forEach(e => this.removeModel(e.mesh)); this.effects = []; this.enemies = []; this.npcs = []; this.seals.forEach(m => this.removeModel(m)); this.seals = [];
-    this.environment = createEnvironment(zone); this.scene.add(this.environment.group);
+    this.environment = createEnvironment(zone, this.state.journey); this.scene.add(this.environment.group);
     this.cameraOccluders = []; this.environment.group.traverse(o => { if (o instanceof T.Mesh && !(o instanceof T.InstancedMesh) && !Array.isArray(o.material) && !o.material.transparent) this.cameraOccluders.push(o); });
     this.environment.group.updateMatrixWorld(true);
     this.state.zone = zone; this.nearby = undefined; this.hero.position.set(1.4, 0, 8); this.hero.rotation.y = Math.PI;
@@ -166,6 +168,7 @@ export class Game {
     const dark = this.environment.dark;
     this.scene.background = new T.Color(dark ? (zone === 'sanctum' ? 0x555263 : 0x6b9299) : 0xc4d7c5);
     this.scene.fog = new T.Fog(dark ? (zone === 'sanctum' ? 0x555263 : 0x6b9299) : 0xc4d7c5, dark ? 28 : 40, dark ? 91 : 118);
+    if (this.environment.coast) { const sky = dark ? 0x61788a : zone === 'wreck' ? 0x9fb9bd : 0xbacfc9; this.scene.background = new T.Color(sky); this.scene.fog = new T.Fog(sky, 40, 125); }
     this.ambient.intensity = dark ? 1.65 : 2.2; this.ambient.color.set(dark ? 0xb1c9e3 : 0xc3e0d6); this.sunlight.intensity = dark ? 1.8 : 3.1;
     this.sunlight.color.set(dark ? 0xc5c0ec : 0xffe9b5);
     this.enemies = this.battle.enemies.map(e => {
@@ -187,9 +190,38 @@ export class Game {
       const npc = character(landmark.kind === 'elder', landmark.kind === 'elder' ? 0x6c7b5b : 0x9b7945);
       npc.position.set(landmark.x, terrainHeight(landmark.x, landmark.z), landmark.z); npc.rotation.y = 0.5; this.npcs.push(npc); this.scene.add(npc);
     }
+    for (const landmark of this.environment.landmarks) if (landmark.storyId) {
+      const site = STORY_SITES[landmark.storyId];
+      if (!['npc', 'rescue', 'workshop'].includes(site.kind)) continue;
+      const tint = site.kind === 'rescue' ? 0x789574 : site.kind === 'workshop' ? 0xaa7c4f : 0x567e95;
+      const npc = character(false, tint, tint);
+      npc.userData.storyId = landmark.storyId; npc.position.set(landmark.x, terrainHeight(landmark.x, landmark.z), landmark.z); this.npcs.push(npc); this.scene.add(npc);
+    }
+    if (zone === 'harbor' || zone === 'village') {
+      const residents = zone === 'harbor' ? [{ id: 'ian', x: -9, z: 13, name: '돌아온 이안', text: '이안은 다음 항해에 쓸 그물을 손질하고 있습니다. “이번엔 돌아올 등대가 있네요.”' }, { id: 'sera', x: -12, z: 4, name: '돌아온 세라', text: '세라는 새 항해일지를 펼칩니다. “수호자도, 당신도 잊지 않을 거예요.”' }] : [{ id: 'lyra', x: 3, z: 5, name: '돌아온 리라', text: '리라는 숲에서 구한 토끼를 돌보고 있습니다. “다치면 언제든 찾아오세요. 이제 혼자 숲에 들어가지 않을게요.”' }];
+      for (const r of residents) {
+        if (!this.state.journey.flags.includes(r.id as StoryId)) continue;
+        const npc = character(false, 0x6a947f); npc.position.set(r.x, terrainHeight(r.x, r.z), r.z); this.npcs.push(npc); this.scene.add(npc);
+        this.environment.landmarks.push({ ...r, kind: 'resident' });
+      }
+    }
     this.hero.position.y = terrainHeight(this.hero.position.x, this.hero.position.z);
-    this.applyDisplay(); this.updateCamera(1); this.hooks.event({ type: 'zone' });
+    this.refreshStory(); this.applyDisplay(); this.updateCamera(1); this.hooks.event({ type: 'zone' });
   }
+  refreshStory() {
+    refreshCoast(this.environment, this.state.journey);
+    this.npcs.forEach(n => { if (n.userData.storyId) n.visible = activeSite(this.state, n.userData.storyId); });
+    this.environment.group.updateMatrixWorld(true);
+    this.cameraOccluders = []; this.environment.group.traverseVisible(o => { if (o instanceof T.Mesh && !(o instanceof T.InstancedMesh) && !Array.isArray(o.material) && !o.material.transparent) this.cameraOccluders.push(o); });
+    this.hooks.update();
+  }
+  beginJourney() { if (!beginJourney(this.state, this.hero.position)) return false; this.save(); this.refreshStory(); return true; }
+  craft(id: RecipeId) {
+    if (!craft(this.state, id, this.hero.position)) { this.toast(craftingProblem(this.state, id) ?? '도란의 작업대 가까이에서 제작하세요.'); return false; }
+    this.save(); this.sound.play('level'); this.toast('제작 완료 · 가방과 모험 일지를 확인하세요.', true); this.refreshStory(); return true;
+  }
+  buyMaterial(id: MaterialId) { if (!buyMaterial(this.state, id, this.hero.position)) return false; this.save(); this.hooks.update(); return true; }
+  siteActive(l: Landmark) { return !l.storyId || activeSite(this.state, l.storyId); }
   travel(zone: Zone) {
     if (!canTravel(this.state, zone)) { this.toast(`${ZONES[zone].name}: 메인 이야기와 레벨 ${ZONES[zone].level} 조건을 달성하세요.`); return false; }
     this.loadZone(zone); this.save(); this.hooks.update(); return true;
@@ -221,7 +253,7 @@ export class Game {
   potion() { if (!this.paused) this.battle.potion(); this.flushEvents(); }
   dodge() { if (!this.paused) { this.battle.dodge(this.movement()); if (this.battle.dodgeTime > 0) this.attackAnimation = 0; } this.flushEvents(); }
   private landmarkNearby() {
-    return this.environment.landmarks.find(l => Math.hypot(l.x - this.hero.position.x, l.z - this.hero.position.z) < (l.kind === 'seal' ? 3.2 : 4.4) && (l.kind !== 'seal' || this.battle.boss?.bossPhase === 3));
+    return this.environment.landmarks.filter(l => this.siteActive(l) && Math.hypot(l.x - this.hero.position.x, l.z - this.hero.position.z) < (l.kind === 'seal' ? 3.2 : l.kind === 'story' ? 3.5 : 4.4) && (l.kind !== 'seal' || this.battle.boss?.bossPhase === 3)).sort((a, b) => Math.hypot(a.x - this.hero.position.x, a.z - this.hero.position.z) - Math.hypot(b.x - this.hero.position.x, b.z - this.hero.position.z))[0];
   }
   interact() {
     if (this.paused) return;
@@ -229,6 +261,13 @@ export class Game {
     if (!this.nearby) { this.toast('NPC나 차원문, 활성화된 봉인에 가까이 다가가세요.'); return; }
     if (this.nearby.kind === 'portal') this.travel(this.nearby.destination!);
     else if (this.nearby.kind === 'seal') { this.battle.activateSeal(this.nearby.index!); this.flushEvents(); }
+    else if (this.nearby.storyId) {
+      const before = this.state.level; this.storyResult = interactStory(this.state, this.nearby.storyId, { zone: this.state.zone, position: this.hero.position, enemies: this.enemies });
+      if (!this.storyResult.ok) { this.toast(this.storyResult.text.join(' ')); return; }
+      if (this.storyResult.changed) { this.save(); this.refreshStory(); if (this.state.level > before) this.hooks.event({ type: 'level', text: `레벨 ${this.state.level}` }); }
+      this.hooks.event({ type: 'story' }); this.sound.play('click');
+    }
+    else if (this.nearby.kind === 'resident') { this.storyResult = { ok: true, changed: false, title: this.nearby.name, text: [this.nearby.text!] }; this.hooks.event({ type: 'story' }); }
     else { this.hooks.event({ type: 'interact', landmark: this.nearby }); this.sound.play('click'); }
   }
   private flushEvents() {
@@ -246,7 +285,7 @@ export class Game {
     }
     if (save) this.save();
   }
-  revive() { this.state.hp = maxHp(this.state); this.state.mp = maxMp(this.state); this.loadZone('village'); this.setPaused(false); this.save(); this.hooks.update(); }
+  revive() { this.state.hp = maxHp(this.state); this.state.mp = maxMp(this.state); this.loadZone(this.environment.coast ? 'harbor' : 'village'); this.setPaused(false); this.save(); this.hooks.update(); }
   private effect(position: T.Vector3, color: number, duration: number, expand: number, slash = false, line = false, yaw = this.battle.facing) {
     const geometry = line ? new T.PlaneGeometry(0.3, expand) : slash ? new T.TorusGeometry(1, 0.045, 4, 24, Math.PI * 1.3) : new T.RingGeometry(0.85, 1, 48);
     const m = new T.Mesh(geometry, new T.MeshBasicMaterial({ color, side: T.DoubleSide, transparent: true, opacity: 0.85, depthWrite: false, blending: T.AdditiveBlending }));
