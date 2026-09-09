@@ -96,7 +96,7 @@ test.describe('coastal touch interface', () => {
   test('touch interactions, workshop, world map and saved rune instructions fit the small screen', async ({ page }, testInfo) => {
     const s = newGame(); s.chapter = 6; s.level = 10; s.zone = 'wreck'; s.journey.step = 4;
     s.journey.flags = [...new Set(JOURNEY.slice(1, 4).flatMap(q => q.objectives)), 'inscription']; s.journey.tide = 'low'; s.journey.runes = ['shell'];
-    await page.addInitScript(raw => localStorage.setItem('elderwood-save-v3', raw), JSON.stringify(s));
+    await page.addInitScript(raw => localStorage.setItem('elderwood-save-v4', raw), JSON.stringify(s));
     await page.goto('/'); await expect(page.locator('#loading')).toHaveCount(0, { timeout: 30000 });
     await page.evaluate(() => (window as any).__ELDERWOOD__.hero.position.set(0, 0, -24));
     await expect(page.locator('#interaction')).toContainText('달 문양'); await page.locator('[data-action="interact"]').tap();

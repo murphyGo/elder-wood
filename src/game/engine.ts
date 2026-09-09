@@ -1,6 +1,6 @@
 import * as T from 'three';
 import { character, animal, weaponModel, dressArmor, material } from './models';
-import { createEnvironment, disposeEnvironment, animateEnvironment, refreshCoast, terrainHeight, type Environment, type Landmark } from './world';
+import { createEnvironment, disposeEnvironment, animateEnvironment, refreshCoast, refreshSkytree, terrainHeight, type Environment, type Landmark } from './world';
 import { STORY_SITES, activeSite, interactStory, beginJourney, craft, buyMaterial, craftingProblem, journeyReady, type RecipeId, type MaterialId, type StoryId, type StoryResult } from './journey';
 import { animateHuman, animateAnimal } from './animation';
 import { FollowCamera } from './camera';
@@ -10,9 +10,11 @@ import { MONSTERS, ZONES, equippedItem, equipItem, maxHp, maxMp, canTravel, type
 import { Combat, SEALS, type Enemy as CombatEnemy, type Telegraph } from './combat';
 import { SaveRepository, type LoadResult } from './persistence';
 import { type Point } from './geometry';
+import { FINAL_SITES, ROOT_ANCHORS, beginFinale, chooseEnding, interactFinale, finalHomecoming, type EndingChoice } from './finale';
+import { beginTrial, trialProblem, trialEncounter, finishTrialWave, nextTrialWave, claimTrial, forgeWeapon, type TrialRun, type TrialKind } from './trials';
 
 export interface Enemy extends CombatEnemy { model: T.Group; ring: T.Mesh; shadow: T.Group; previous: Point }
-export type GameEvent = { type: 'toast' | 'level' | 'kill' | 'death' | 'zone' | 'interact' | 'quest' | 'saved' | 'phase' | 'practice' | 'story'; text?: string; landmark?: Landmark; good?: boolean };
+export type GameEvent = { type: 'toast' | 'level' | 'kill' | 'death' | 'zone' | 'interact' | 'quest' | 'saved' | 'phase' | 'practice' | 'story' | 'choice' | 'trial'; text?: string; landmark?: Landmark; good?: boolean };
 export interface Hooks { update: () => void; event: (event: GameEvent) => void; float: (text: string, position: T.Vector3, color: string) => void }
 
 class Sound {
@@ -42,6 +44,7 @@ export class Game {
   keys = new Set<string>(); sound = new Sound(); paused = false; running = true;
   battle!: Combat; nearby?: Landmark; repository: SaveRepository; loadResult: LoadResult;
   storyResult?: StoryResult;
+  activeTrial?: TrialRun;
   get target() { return this.enemies.find(e => e.id === this.battle?.targetId); }
   set target(e: Enemy | undefined) { if (this.battle) { this.battle.targetId = e?.id; if (this.battle.lockedTargetId !== undefined) this.battle.lockedTargetId = e?.id; } }
   get lockedTarget() { return this.enemies.find(e => e.id === this.battle?.lockedTargetId && e.hp > 0); }
@@ -153,16 +156,17 @@ export class Game {
   equip(id: ItemId) { if (!equipItem(this.state, id)) return false; this.setWeapon(this.state.weapon); return true; }
   private removeModel(model: T.Object3D) { model.traverse(o => { if (o instanceof T.Mesh || o instanceof T.Line) { o.geometry.dispose(); if (o.material instanceof T.MeshBasicMaterial || o.material instanceof T.LineBasicMaterial) o.material.dispose(); } }); model.removeFromParent(); }
   loadZone(zone: Zone) {
+    if (zone !== 'trial') this.activeTrial = undefined;
     if (this.environment) disposeEnvironment(this.environment);
     this.enemies.forEach(e => { this.removeModel(e.model); this.removeModel(e.ring); this.removeModel(e.shadow); }); this.npcs.forEach(n => this.removeModel(n));
     this.projectileViews.forEach(m => this.removeModel(m)); this.projectileViews.clear();
     this.telegraphViews.forEach(v => this.removeModel(v.mesh)); this.telegraphViews.clear();
     this.effects.forEach(e => this.removeModel(e.mesh)); this.effects = []; this.enemies = []; this.npcs = []; this.seals.forEach(m => this.removeModel(m)); this.seals = [];
-    this.environment = createEnvironment(zone, this.state.journey); this.scene.add(this.environment.group);
+    this.environment = createEnvironment(zone, this.state.journey, this.state.finale); this.scene.add(this.environment.group);
     this.cameraOccluders = []; this.environment.group.traverse(o => { if (o instanceof T.Mesh && !(o instanceof T.InstancedMesh) && !Array.isArray(o.material) && !o.material.transparent) this.cameraOccluders.push(o); });
     this.environment.group.updateMatrixWorld(true);
     this.state.zone = zone; this.nearby = undefined; this.hero.position.set(1.4, 0, 8); this.hero.rotation.y = Math.PI;
-    this.battle = new Combat(this.state, zone, this.environment.obstacles, zone === 'sanctum' && this.state.chapter >= 5);
+    this.battle = new Combat(this.state, zone, this.environment.obstacles, zone === 'sanctum' && this.state.chapter >= 5, zone === 'trial' && this.activeTrial ? trialEncounter(this.activeTrial) : undefined);
     this.battle.player = this.hero.position;
     this.jumpHeight = 0; this.jumpVelocity = 0; this.dodgeTime = 0; this.clearInput();
     const dark = this.environment.dark;
@@ -171,6 +175,11 @@ export class Game {
     if (this.environment.coast) { const sky = dark ? 0x61788a : zone === 'wreck' ? 0x9fb9bd : 0xbacfc9; this.scene.background = new T.Color(sky); this.scene.fog = new T.Fog(sky, 40, 125); }
     this.ambient.intensity = dark ? 1.65 : 2.2; this.ambient.color.set(dark ? 0xb1c9e3 : 0xc3e0d6); this.sunlight.intensity = dark ? 1.8 : 3.1;
     this.sunlight.color.set(dark ? 0xc5c0ec : 0xffe9b5);
+    if (this.environment.skytree) {
+      const sky = zone === 'trial' ? 0x9a9eb7 : zone === 'ruins' ? 0xc5d3c0 : this.state.finale.choice === 'release' ? 0xa5c9c0 : 0xd3c7ab;
+      this.scene.background = new T.Color(sky); this.scene.fog = new T.Fog(sky, 46, 135);
+      this.ambient.intensity = 2; this.sunlight.intensity = 2.5; this.sunlight.color.set(0xffead0);
+    }
     this.enemies = this.battle.enemies.map(e => {
       const data = MONSTERS[e.species]; const model = animal(e.species); model.scale.setScalar(data.size);
       model.position.set(e.pos.x, terrainHeight(e.pos.x, e.pos.z), e.pos.z); e.pos = model.position; this.scene.add(model);
@@ -179,13 +188,18 @@ export class Game {
       const shadow = contactShadow(data.size * .55); this.scene.add(shadow);
       return Object.assign(e, { model, ring, shadow, previous: { x: e.pos.x, z: e.pos.z } });
     });
-    if (zone === 'sanctum') SEALS.forEach((p, index) => {
-      this.environment.landmarks.push({ ...p, kind: 'seal', name: `별의 봉인 ${index + 1}`, index });
+    const rootBoss = this.battle.boss?.species === 'starwarden';
+    if (zone === 'sanctum' || this.battle.boss?.species === 'dragon' || rootBoss) (rootBoss ? ROOT_ANCHORS : SEALS).forEach((p, index) => {
+      this.environment.landmarks.push({ ...p, kind: rootBoss ? 'root' : 'seal', name: `${rootBoss ? '뿌리의 공명' : '별의 봉인'} ${index + 1}`, index });
       const seal = new T.Group(); seal.position.set(p.x, terrainHeight(p.x, p.z), p.z);
       const base = new T.Mesh(new T.CylinderGeometry(0.9, 1.1, 0.3, 6), material(0x828c8a)); base.position.y = 0.15;
       const crystal = new T.Mesh(new T.OctahedronGeometry(0.65), new T.MeshBasicMaterial({ color: 0xc1e1b5, transparent: true, opacity: 0.6 })); crystal.position.y = 1.2;
       seal.add(base, crystal); this.scene.add(seal); this.seals.push(seal);
     });
+    if (zone === 'ruins') {
+      const site = FINAL_SITES.elion_ally, npc = character(true, 0x8c9971);
+      npc.position.set(site.x, terrainHeight(site.x, site.z), site.z); npc.userData.finalId = 'elion_ally'; this.npcs.push(npc); this.scene.add(npc);
+    }
     for (const landmark of this.environment.landmarks) if (landmark.kind === 'elder' || landmark.kind === 'shop') {
       const npc = character(landmark.kind === 'elder', landmark.kind === 'elder' ? 0x6c7b5b : 0x9b7945);
       npc.position.set(landmark.x, terrainHeight(landmark.x, landmark.z), landmark.z); npc.rotation.y = 0.5; this.npcs.push(npc); this.scene.add(npc);
@@ -202,7 +216,8 @@ export class Game {
       for (const r of residents) {
         if (!this.state.journey.flags.includes(r.id as StoryId)) continue;
         const npc = character(false, 0x6a947f); npc.position.set(r.x, terrainHeight(r.x, r.z), r.z); this.npcs.push(npc); this.scene.add(npc);
-        this.environment.landmarks.push({ ...r, kind: 'resident' });
+        const text = this.state.finale.step === 6 ? this.state.finale.choice === 'renew' ? `${r.name}도 마을의 수호석을 돌보는 일을 맡았습니다. “다음 세대에도 함께 지키는 법을 알려 줄 거예요.”` : `${r.name}는 빛나는 씨앗을 담은 주머니를 건넵니다. “당신이 열어 준 길을 따라, 이 빛도 멀리 여행하겠죠.”` : r.text;
+        this.environment.landmarks.push({ ...r, text, kind: 'resident' });
       }
     }
     this.hero.position.y = terrainHeight(this.hero.position.x, this.hero.position.z);
@@ -210,18 +225,44 @@ export class Game {
   }
   refreshStory() {
     refreshCoast(this.environment, this.state.journey);
+    refreshSkytree(this.environment, this.state.finale);
     this.npcs.forEach(n => { if (n.userData.storyId) n.visible = activeSite(this.state, n.userData.storyId); });
+    this.npcs.forEach(n => { if (n.userData.finalId) n.visible = this.state.finale.step >= FINAL_SITES[n.userData.finalId as keyof typeof FINAL_SITES].step; });
     this.environment.group.updateMatrixWorld(true);
     this.cameraOccluders = []; this.environment.group.traverseVisible(o => { if (o instanceof T.Mesh && !(o instanceof T.InstancedMesh) && !Array.isArray(o.material) && !o.material.transparent) this.cameraOccluders.push(o); });
     this.hooks.update();
   }
   beginJourney() { if (!beginJourney(this.state, this.hero.position)) return false; this.save(); this.refreshStory(); return true; }
+  beginFinale() { if (!beginFinale(this.state, this.hero.position)) return false; this.save(); this.refreshStory(); return true; }
+  chooseEnding(choice: EndingChoice) { if (!chooseEnding(this.state, choice, this.hero.position)) return false; this.save(); this.refreshStory(); return true; }
+  startTrial(kind: TrialKind, tier: number) {
+    if (this.activeTrial) return false;
+    const run = beginTrial(this.state, kind, tier);
+    if (!run) { this.toast(trialProblem(this.state, kind, tier)!); return false; }
+    this.activeTrial = run; this.loadZone('trial'); this.save(); this.setPaused(false); return true;
+  }
+  nextTrialWave() {
+    if (!this.activeTrial || !nextTrialWave(this.activeTrial)) return false;
+    this.loadZone('trial'); this.save(); this.setPaused(false); return true;
+  }
+  claimTrial() {
+    if (!this.activeTrial) return null;
+    const level = this.state.level, reward = claimTrial(this.state, this.activeTrial); if (!reward) return null;
+    this.loadZone('village'); this.save(); this.hooks.update();
+    if (this.state.level > level) this.hooks.event({ type: 'level', text: `레벨 ${this.state.level}` });
+    return reward;
+  }
+  forge(weapon: Weapon) { if (!forgeWeapon(this.state, weapon)) return false; this.save(); this.sound.play('level'); this.hooks.update(); return true; }
   craft(id: RecipeId) {
     if (!craft(this.state, id, this.hero.position)) { this.toast(craftingProblem(this.state, id) ?? '도란의 작업대 가까이에서 제작하세요.'); return false; }
     this.save(); this.sound.play('level'); this.toast('제작 완료 · 가방과 모험 일지를 확인하세요.', true); this.refreshStory(); return true;
   }
   buyMaterial(id: MaterialId) { if (!buyMaterial(this.state, id, this.hero.position)) return false; this.save(); this.hooks.update(); return true; }
-  siteActive(l: Landmark) { return !l.storyId || activeSite(this.state, l.storyId); }
+  siteActive(l: Landmark) {
+    if (l.ending) return this.state.finale.step === 6;
+    if (l.finalId) return this.state.finale.step >= FINAL_SITES[l.finalId].step;
+    return !l.storyId || activeSite(this.state, l.storyId);
+  }
   travel(zone: Zone) {
     if (!canTravel(this.state, zone)) { this.toast(`${ZONES[zone].name}: 메인 이야기와 레벨 ${ZONES[zone].level} 조건을 달성하세요.`); return false; }
     this.loadZone(zone); this.save(); this.hooks.update(); return true;
@@ -253,7 +294,7 @@ export class Game {
   potion() { if (!this.paused) this.battle.potion(); this.flushEvents(); }
   dodge() { if (!this.paused) { this.battle.dodge(this.movement()); if (this.battle.dodgeTime > 0) this.attackAnimation = 0; } this.flushEvents(); }
   private landmarkNearby() {
-    return this.environment.landmarks.filter(l => this.siteActive(l) && Math.hypot(l.x - this.hero.position.x, l.z - this.hero.position.z) < (l.kind === 'seal' ? 3.2 : l.kind === 'story' ? 3.5 : 4.4) && (l.kind !== 'seal' || this.battle.boss?.bossPhase === 3)).sort((a, b) => Math.hypot(a.x - this.hero.position.x, a.z - this.hero.position.z) - Math.hypot(b.x - this.hero.position.x, b.z - this.hero.position.z))[0];
+    return this.environment.landmarks.filter(l => this.siteActive(l) && Math.hypot(l.x - this.hero.position.x, l.z - this.hero.position.z) < (l.kind === 'seal' || l.kind === 'root' ? 3.2 : l.kind === 'story' || l.kind === 'finale' ? 3.5 : 4.4) && (l.kind !== 'seal' || this.battle.boss?.species === 'dragon' && this.battle.boss.bossPhase === 3) && (l.kind !== 'root' || this.battle.boss?.species === 'starwarden' && this.battle.boss.bossPhase === 2)).sort((a, b) => Math.hypot(a.x - this.hero.position.x, a.z - this.hero.position.z) - Math.hypot(b.x - this.hero.position.x, b.z - this.hero.position.z))[0];
   }
   interact() {
     if (this.paused) return;
@@ -261,6 +302,13 @@ export class Game {
     if (!this.nearby) { this.toast('NPC나 차원문, 활성화된 봉인에 가까이 다가가세요.'); return; }
     if (this.nearby.kind === 'portal') this.travel(this.nearby.destination!);
     else if (this.nearby.kind === 'seal') { this.battle.activateSeal(this.nearby.index!); this.flushEvents(); }
+    else if (this.nearby.kind === 'root') { this.battle.activateRoot(this.nearby.index!); this.flushEvents(); }
+    else if (this.nearby.finalId) {
+      const result = interactFinale(this.state, this.nearby.finalId, this.state.zone, this.hero.position); this.storyResult = result;
+      if (!result.ok) { this.toast(result.text.join(' ')); return; }
+      if (result.changed) { this.save(); this.refreshStory(); }
+      this.hooks.event({ type: result.choose ? 'choice' : 'story' }); this.sound.play('click');
+    }
     else if (this.nearby.storyId) {
       const before = this.state.level; this.storyResult = interactStory(this.state, this.nearby.storyId, { zone: this.state.zone, position: this.hero.position, enemies: this.enemies });
       if (!this.storyResult.ok) { this.toast(this.storyResult.text.join(' ')); return; }
@@ -268,7 +316,7 @@ export class Game {
       this.hooks.event({ type: 'story' }); this.sound.play('click');
     }
     else if (this.nearby.kind === 'resident') { this.storyResult = { ok: true, changed: false, title: this.nearby.name, text: [this.nearby.text!] }; this.hooks.event({ type: 'story' }); }
-    else { this.hooks.event({ type: 'interact', landmark: this.nearby }); this.sound.play('click'); }
+    else { if (this.nearby.kind === 'elder' && finalHomecoming(this.state, this.hero.position)) { this.save(); this.refreshStory(); } this.hooks.event({ type: 'interact', landmark: this.nearby }); this.sound.play('click'); }
   }
   private flushEvents() {
     let save = false;
@@ -281,7 +329,7 @@ export class Game {
       }
       else if (event.kind === 'fx') this.effect(p, new T.Color(event.color).getHex(), 0.55, event.radius ?? 2, event.shape === 'slash', event.shape === 'line', event.yaw);
       else if (event.kind === 'save') save = true;
-      else { if (event.kind === 'death') this.setPaused(true); this.hooks.event({ type: event.kind, text: event.text }); }
+      else { if (event.kind === 'death') { this.setPaused(true); if (this.activeTrial) this.activeTrial.status = 'abandoned'; } this.hooks.event({ type: event.kind, text: event.text }); }
     }
     if (save) this.save();
   }
@@ -339,6 +387,10 @@ export class Game {
     this.heroShadow.scale.setScalar(1 / (1 + this.jumpHeight * .3));
     this.npcs.forEach(npc => animateHuman(npc, dt, { weapon: 'spear', distance: 0, time: this.time, attack: 0, action: '', parry: false, dodge: false, jump: 0, landed: false }));
     if (this.heldAttack || this.keys.has('KeyJ')) this.attack();
+    if (this.activeTrial?.status === 'active') {
+      this.activeTrial.elapsed += dt;
+      if (finishTrialWave(this.activeTrial, this.battle)) { this.setPaused(true); this.save(); this.hooks.event({ type: 'trial' }); }
+    }
     this.nearby = this.landmarkNearby();
     this.updateBattleViews(dt); this.impacts.update(dt);
     for (let i = this.effects.length - 1; i >= 0; i--) {
@@ -379,7 +431,7 @@ export class Game {
       e.ring.position.set(e.pos.x, terrainHeight(e.pos.x, e.pos.z) + .10, e.pos.z);
       e.shadow.position.set(e.pos.x, terrainHeight(e.pos.x, e.pos.z), e.pos.z); e.shadow.visible = live; e.shadow.scale.setScalar(1 / (1 + Math.max(0, altitude) * .2));
       e.model.rotation.y = e.facing; e.ring.visible = live && this.target === e;
-      (e.ring.material as T.MeshBasicMaterial).color.set(e.bossPhase === 3 && !this.battle.exposure ? 0xba9fea : e.slow ? 0x9dcde1 : 0xe6ce94);
+      (e.ring.material as T.MeshBasicMaterial).color.set(((e.species === 'dragon' && e.bossPhase === 3) || (e.species === 'starwarden' && e.bossPhase === 2)) && !this.battle.exposure ? 0xba9fea : e.slow ? 0x9dcde1 : 0xe6ce94);
       const view = this.telegraphViews.get(e.id);
       if (view && view.source !== e.telegraph) { this.removeModel(view.mesh); this.telegraphViews.delete(e.id); }
       if (live && e.telegraph && !this.telegraphViews.has(e.id)) this.telegraphViews.set(e.id, { source: e.telegraph, mesh: this.telegraphMesh(e.telegraph) });
@@ -402,7 +454,7 @@ export class Game {
       mesh.position.set(p.pos.x, Math.max(terrainHeight(p.pos.x, p.pos.z) + .2, mesh.userData.height + traveled * mesh.userData.slope), p.pos.z);
       mesh.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(Math.sin(p.yaw), mesh.userData.slope, Math.cos(p.yaw)).normalize());
     }
-    this.seals.forEach((seal, i) => { const crystal = seal.children[1] as T.Mesh<T.BufferGeometry, T.MeshBasicMaterial>; crystal.rotation.y = this.time * 0.6; crystal.position.y = 1.2 + Math.sin(this.time * 2 + i) * 0.1; crystal.material.opacity = this.battle.boss?.bossPhase === 3 && !this.battle.sealCooldowns[i] ? 1 : 0.3; });
+    this.seals.forEach((seal, i) => { const crystal = seal.children[1] as T.Mesh<T.BufferGeometry, T.MeshBasicMaterial>; crystal.rotation.y = this.time * 0.6; crystal.position.y = 1.2 + Math.sin(this.time * 2 + i) * 0.1; const boss = this.battle.boss; crystal.material.opacity = boss?.bossPhase === (boss?.species === 'starwarden' ? 2 : 3) && !this.battle.sealCooldowns[i] ? 1 : 0.3; });
     this.shieldView.visible = this.battle.shield > 0 || this.battle.parryTime > 0;
     this.shieldView.position.copy(this.hero.position).add(new T.Vector3(0, 1.2, 0));
   }

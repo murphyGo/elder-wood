@@ -108,7 +108,7 @@ export function weaponModel(type:Weapon,id:ItemId=STARTER_ITEMS[type]){
 export interface AnimalRig {body:T.Group;legs:T.Group[];knees:T.Group[];head:T.Group;neck:T.Group;jaw:T.Group;tail:T.Group;wings:T.Group[];ears:T.Group[];stride:number;motion:number;altitude:number;species:Species}
 export function animal(type:Species){
   const root=new T.Group();root.name=type;const body=joint(root,'body');const small=type==='squirrel'||type==='rabbit',dragon=type==='dragon',aquatic=['shark','reef_shark','leviathan'].includes(type);
-  const colors:Record<Species,number>={squirrel:0xa96635,rabbit:0xe3ddc9,cow:0x927250,horse:0x725043,hippo:0x7e8c8c,tiger:0xd19744,shark:0x527c8b,dragon:0x465663,reef_shark:0x527d82,leviathan:0x3e586e};const color=colors[type];
+  const colors:Record<Species,number>={squirrel:0xa96635,rabbit:0xe3ddc9,cow:0x927250,horse:0x725043,hippo:0x7e8c8c,tiger:0xd19744,shark:0x527c8b,dragon:0x465663,reef_shark:0x527d82,leviathan:0x3e586e,thornbeast:0x655f47,starwarden:0x8e9576};const color=colors[type];
   const y=small?.43:type==='horse'?1.03:dragon?.88:.7;
   const width=small?.27:type==='hippo'?.62:type==='horse'?.37:.45, height=small?.29:type==='hippo'?.52:.47, length=small?.46:type==='hippo'?.87:dragon?1.02:.76;
   ellipsoid(body,color,0,y,0,width,height,length);ellipsoid(body,dragon?0xa69c78:aquatic?0xc0d1c7:small?0xe0c7a1:type==='tiger'?0xe8d1a0:color,0,y-.14,.12,width*.88,height*.62,length*.86);
@@ -172,6 +172,23 @@ export function animal(type:Species){
       crystal.scale.set(.55,1.9,.55);crystal.rotation.z=side*-.35;
     }
     if(boss){ for(const side of [-1,1]) curve(head,[[side*.27,.15,-.15],[side*.38,.34,-.36],[side*.30,.42,-.57]],0xabb7c9,.05); }
+  }
+  if(type==='thornbeast'||type==='starwarden') {
+    const guardian=type==='starwarden', light=guardian?0xe4cf93:0xaab780;
+    for(const side of [-1,1]) {
+      if(guardian) {
+        curve(head,[[side*.20,.15,-.10],[side*.37,.62,-.18],[side*.65,1.15,-.25],[side*.80,1.35,-.45]],0xb6ad89,.06);
+        for(let i=0;i<3;i++)curve(head,[[side*(.35+i*.13),.55+i*.24,-.18],[side*(.70+i*.15),.76+i*.27,.03]],light,.038);
+      }
+      for(let i=0;i<5;i++) {
+        const bark=ico(body,.19,guardian?0xa8b399:0x484d38,side*.34,y+.28,-.60+i*.28,0);bark.scale.set(.6,1.2,1.6);bark.rotation.z=side*-.45;
+        const thorn=mesh(body,new T.ConeGeometry(.08,guardian?.32:.55,4),light,side*.25,y+.51,-.6+i*.27);thorn.rotation.z=side*-.55;
+      }
+    }
+    if(guardian) {
+      const heart=mesh(body,new T.OctahedronGeometry(.28),0xf1dba2,0,y+.45,.30,0x6b5328);heart.scale.set(.8,1.5,.8);
+      const crown=mesh(head,new T.TorusGeometry(.40,.025,5,24),0xe6cf93,0,.6,0);crown.rotation.x=Math.PI/2;
+    }
   }
   root.userData={body,legs,knees,head,neck,jaw,tail,wings,ears,stride:0,motion:0,altitude:0,species:type} satisfies AnimalRig;bake(root);return root;
 }

@@ -52,7 +52,7 @@ describe('combat resources and equipment', () => {
   });
   it('gives different weapons different power and range', () => {
     const s = newGame(); expect(attackPower(s)).toBe(18); s.weapon = 'spear'; expect(attackPower(s)).toBe(22); s.weapon = 'bow'; expect(attackPower(s)).toBe(16);
-    expect(Object.keys(MONSTERS)).toHaveLength(10);
+    expect(Object.keys(MONSTERS)).toHaveLength(12);
   });
 });
 describe('save integrity', () => {

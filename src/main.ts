@@ -1,6 +1,9 @@
 import './style.css';
-import { Vector3 } from 'three';
-import { Game, type GameEvent } from './game/engine';
+import type { Vector3 } from 'three';
+import type { Game, GameEvent } from './game/engine';
+import { FINALE, CHOICES, finaleReady, completeFinale, endingText, type EndingChoice } from './game/finale';
+import { TRIALS, type TrialKind } from './game/trials';
+import { finaleObjectivesHTML, finaleJournalHTML, choiceHTML, elionFinaleText, trialsHTML } from './finale-ui';
 import { CHAPTERS, WEAPONS, SKILL_KEYS, getSkill, ITEMS, DIFFICULTIES, equippedItem, buyItem, setDifficulty, ZONES, MONSTERS, maxHp, maxMp, xpRequired, attackPower, defense, canTravel, questReady, completeQuest, buyPotion, upgradeArmor, newGame, type Zone, type Weapon, type Skill, type Species, type ItemId, type Difficulty } from './game/state';
 import { QUALITY_NAMES, type Quality } from './game/settings';
 import { JOURNEY, currentQuest, journeyReady, completeJourney, type RecipeId, type MaterialId } from './game/journey';
@@ -39,6 +42,7 @@ app.innerHTML = `
 `;
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
+let pendingChoice: EndingChoice | undefined;
 let game: Game; let activePanel = ''; let ready = false; let previousFocus: HTMLElement | null = null; let questSignature = ''; let levelTimer: ReturnType<typeof setTimeout>; let zoneTimer: ReturnType<typeof setTimeout>;
 const mm = $('#minimap-canvas') as HTMLCanvasElement; const ctx = mm.getContext('2d')!;
 const floats: { element: HTMLElement; position: Vector3; start: number }[] = [];
@@ -48,13 +52,14 @@ function render() {
   if (!ready) return;
   const s = game.state;
   $('#level-badge').textContent = String(s.level); $('#player-level').textContent = String(s.level); $('#gold').textContent = s.gold.toLocaleString();
-  $('#player-title').textContent = s.journey.step === 7 ? '숲과 바다의 수호자' : s.chapter === 6 ? '숲의 수호자' : s.level >= 5 ? '별빛의 추적자' : s.level >= 3 ? '숲의 탐험가' : '새로운 모험가';
+  $('#player-title').textContent = s.finale.step === 6 ? '별빛을 잇는 여행자' : s.journey.step === 7 ? '숲과 바다의 수호자' : s.chapter === 6 ? '숲의 수호자' : s.level >= 5 ? '별빛의 추적자' : s.level >= 3 ? '숲의 탐험가' : '새로운 모험가';
   $('#hp-fill').style.width = `${s.hp / maxHp(s) * 100}%`; $('#mp-fill').style.width = `${s.mp / maxMp(s) * 100}%`;
   $('#hp-text').textContent = `${Math.ceil(s.hp)} / ${maxHp(s)}`; $('#mp-text').textContent = `${Math.floor(s.mp)} / ${maxMp(s)}`;
   $('#xp-level').textContent = `Lv. ${s.level}`; $('#xp-fill').style.width = `${s.xp / xpRequired(s.level) * 100}%`; $('#xp-text').textContent = `${s.xp} / ${xpRequired(s.level)} EXP`;
   $('#potion-count').textContent = String(s.potions);
-  if ($('#weapon-name').textContent !== equippedItem(s).name) {
-    $('#weapon-name').textContent = equippedItem(s).name;
+  const weaponName = equippedItem(s).name + (s.trials.forge[s.weapon] ? ` · 공명 +${s.trials.forge[s.weapon]}` : '');
+  if ($('#weapon-name').textContent !== weaponName) {
+    $('#weapon-name').textContent = weaponName;
     $('.weapon-indicator>.icon').outerHTML = icon(WEAPONS[s.weapon].icon);
     $('.skill-slot.basic .skill-symbol').innerHTML = icon(WEAPONS[s.weapon].icon);
   }
@@ -71,13 +76,13 @@ function render() {
     $(`#lock-${k}`).classList.toggle('hidden', !locked); $(`#cooldown-${k}`).textContent = cooldown > 0 ? `${Math.ceil(cooldown)}` : ''; btn.title = `${getSkill(s, k).name}: ${getSkill(s, k).description} · MP ${getSkill(s, k).mana} · 재사용 ${getSkill(s, k).cooldown}초`;
   }
   const target = game.target ?? game.enemies.find(e => isBoss(e.species) && e.hp > 0); $('#target-card').classList.toggle('hidden', !target || target.hp <= 0);
-  if (target && target.hp > 0) { const data = MONSTERS[target.species]; $('#target-card').innerHTML = `<span>Lv. ${data.level}</span><b>${data.name}</b><div class="enemy-health"><i style="width:${target.hp / target.maxHp * 100}%"></i></div><small>${Math.ceil(target.hp)} / ${target.maxHp}</small><p class="enemy-status">${target.species === 'dragon' ? `${game.battle.practice ? '연습전 · ' : ''}${target.bossPhase}단계 · ${target.bossPhase === 3 ? game.battle.exposure > 0 ? `보호막 해제 ${Math.ceil(game.battle.exposure)}초` : '봉인 근처에서 F' : target.airborne ? '비행 중 · 착지 대기' : '지상 전투'}` : target.species === 'leviathan' ? `${target.bossPhase}단계 · ${target.telegraph?.label ?? (target.mode === 'recover' ? '수면 위 · 공격 기회' : '수호자의 움직임을 살피세요')}` : target.telegraph?.label ?? (target.mode === 'recover' ? '빈틈 · 공격 기회' : '')}${target.slow > 0 ? ' · 둔화' : ''}${target.burn ? ' · 화상' : ''}${target.weakened > 0 ? ' · 약화' : ''}</p>`; }
+  if (target && target.hp > 0) { const data = MONSTERS[target.species]; $('#target-card').innerHTML = `<span>Lv. ${data.level}</span><b>${data.name}</b><div class="enemy-health"><i style="width:${target.hp / target.maxHp * 100}%"></i></div><small>${Math.ceil(target.hp)} / ${target.maxHp}</small><p class="enemy-status">${target.species === 'dragon' ? `${game.battle.practice ? '연습전 · ' : ''}${target.bossPhase}단계 · ${target.bossPhase === 3 ? game.battle.exposure > 0 ? `보호막 해제 ${Math.ceil(game.battle.exposure)}초` : '봉인 근처에서 F' : target.airborne ? '비행 중 · 착지 대기' : '지상 전투'}` : target.species === 'starwarden' ? `${target.bossPhase}단계 · ${target.bossPhase === 2 ? game.battle.exposure > 0 ? `보호막 해제 ${Math.ceil(game.battle.exposure)}초` : '공명 장치 근처에서 F' : target.telegraph?.label ?? '공격 후 빈틈을 노리세요'}` : target.species === 'leviathan' ? `${target.bossPhase}단계 · ${target.telegraph?.label ?? (target.mode === 'recover' ? '수면 위 · 공격 기회' : '수호자의 움직임을 살피세요')}` : target.telegraph?.label ?? (target.mode === 'recover' ? '빈틈 · 공격 기회' : '')}${target.slow > 0 ? ' · 둔화' : ''}${target.burn ? ' · 화상' : ''}${target.weakened > 0 ? ' · 약화' : ''}</p>`; }
   $('#target-lock').setAttribute('aria-pressed', String(!!game.lockedTarget));
   $('#target-lock span').textContent = game.lockedTarget ? '고정 해제' : '대상 고정';
   $('#target-lock').classList.toggle('hidden', isSafeZone(game.state.zone));
   $('#interaction').classList.toggle('hidden', !game.nearby || game.paused);
-  if (game.nearby) $('#interaction span').textContent = game.nearby.kind === 'portal' ? `${ZONES[game.nearby.destination!].name} 이동` : game.nearby.kind === 'seal' ? `${game.nearby.name} 작동${game.battle.sealCooldowns[game.nearby.index!] > 0 ? ` · ${Math.ceil(game.battle.sealCooldowns[game.nearby.index!])}초` : ''}` : game.nearby.kind === 'story' ? `${game.nearby.name} · F로 살펴보기` : `${game.nearby.name}와 대화`;
-  const signature = `${s.chapter}:${JSON.stringify(s.kills)}:${s.zone}:${JSON.stringify(s.journey)}`;
+  if (game.nearby) $('#interaction span').textContent = game.nearby.kind === 'portal' ? `${ZONES[game.nearby.destination!].name} 이동` : game.nearby.kind === 'seal' || game.nearby.kind === 'root' ? `${game.nearby.name} 작동${game.battle.sealCooldowns[game.nearby.index!] > 0 ? ` · ${Math.ceil(game.battle.sealCooldowns[game.nearby.index!])}초` : ''}` : game.nearby.kind === 'story' || game.nearby.kind === 'finale' ? `${game.nearby.name} · F로 살펴보기` : `${game.nearby.name}와 대화`;
+  const signature = `${s.chapter}:${JSON.stringify(s.kills)}:${s.zone}:${JSON.stringify(s.journey)}:${JSON.stringify(s.finale)}:${game.activeTrial?.status}:${game.activeTrial?.wave}`;
   if (signature !== questSignature) { questSignature = signature; renderQuest(); }
   drawMinimap(); updateFloats(); updateNameplates();
 }
@@ -87,7 +92,7 @@ function updateNameplates() {
   const occupied = ['.player-card', '.target-card', '.region-caption', '.right-hud'].map(selector => $(selector)).filter(el => el.getClientRects().length).map(el => el.getBoundingClientRect());
   document.querySelectorAll<HTMLElement>('.world-nameplate').forEach((label, index) => {
     const landmark = game.environment.landmarks[index]; if (!landmark) return;
-    const p = new Vector3(landmark.x, landmark.kind === 'portal' ? 5.5 : 3.2, landmark.z).project(game.camera);
+    const p = game.hero.position.clone().set(landmark.x, landmark.kind === 'portal' ? 5.5 : 3.2, landmark.z).project(game.camera);
     const distance = Math.hypot(game.hero.position.x - landmark.x, game.hero.position.z - landmark.z);
     const x = rect.left + (p.x * .5 + .5) * rect.width, y = rect.top + (-p.y * .5 + .5) * rect.height;
     const covered = occupied.some(r => x + 65 > r.left && x - 65 < r.right && y > r.top && y - 30 < r.bottom);
@@ -101,12 +106,13 @@ function updateNameplates() {
 function objectiveRows() {
   const s = game.state;
   if (s.chapter === 0 || s.chapter === 5) return `<div class="objective"><span class="objective-dot"></span><span>장로 엘리온과 대화</span><span>${icon('pin')}</span></div>`;
-  if (s.chapter === 6) return expansionObjectivesHTML(s);
+  if (s.chapter === 6) return s.journey.step === 7 ? finaleObjectivesHTML(s) : expansionObjectivesHTML(s);
   return Object.entries(CHAPTERS[s.chapter].objectives).map(([type, count]) => { const n = Math.min(s.kills[type as Species] ?? 0, count!); return `<div class="objective ${n >= count! ? 'complete' : ''}"><span class="objective-dot">${n >= count! ? icon('check') : ''}</span><span>${MONSTERS[type as Species].name} 해방</span><b>${n}<em> / ${count}</em></b></div>`; }).join('');
 }
 function renderQuest() {
   const s = game.state; const q = currentQuest(s);
-  $('#quest-content').innerHTML = `${s.zone === 'wreck' ? `<div class="tide-readout">${icon('drop')}${s.journey.tide === 'low' ? '썰물 · 중앙 돌길 열림' : '밀물 · 조수륜으로 길을 여세요'}</div>` : ''}<p class="chapter-label">${q.subtitle}</p><h2>${q.title}</h2><p class="quest-description">${q.description}</p><div class="objectives">${objectiveRows()}</div>${(questReady(s) || journeyReady(s)) ? `<button class="quest-reward" data-action="claim">보상 받고 이야기 이어가기 ${icon('arrow')}</button>` : `<button class="quest-location" data-panel="map">${icon('pin')} ${ZONES[q.zone].name}<span>${icon('chevron')}</span></button>`}${s.zone === 'forest' ? `<button class="side-story-link" data-panel="journal">${icon('book')}${s.journey.flags.includes('lyra') ? '리라 구조 완료' : '선택 이야기 · 약초사의 발자국'}</button>` : ''}`;
+  if (game.activeTrial) { const r = game.activeTrial; $('#quest-content').innerHTML = `<p class="chapter-label">메아리의 회랑 · ${r.tier}등급</p><h2>${TRIALS[r.kind].name}</h2><p class="quest-description">전투 ${r.wave + 1} / ${TRIALS[r.kind].waves.length} · ${r.status === 'won' ? '도전 완료! 보상을 받으세요.' : r.status === 'between' ? '다음 전투를 준비하세요.' : '남은 수호자를 해방하세요.'}</p><button class="quest-reward" data-panel="trials">${r.status === 'won' ? '완료 보상 받기' : r.status === 'between' ? '다음 전투' : '도전 정보'} ${icon('arrow')}</button>`; return; }
+  $('#quest-content').innerHTML = `${s.zone === 'wreck' ? `<div class="tide-readout">${icon('drop')}${s.journey.tide === 'low' ? '썰물 · 중앙 돌길 열림' : '밀물 · 조수륜으로 길을 여세요'}</div>` : ''}<p class="chapter-label">${q.subtitle}</p><h2>${q.title}</h2><p class="quest-description">${q.description}</p><div class="objectives">${objectiveRows()}</div>${(questReady(s) || journeyReady(s) || finaleReady(s)) ? `<button class="quest-reward" data-action="claim">보상 받고 이야기 이어가기 ${icon('arrow')}</button>` : `<button class="quest-location" data-panel="map">${icon('pin')} ${ZONES[q.zone].name}<span>${icon('chevron')}</span></button>`}${s.finale.step === 6 ? `<button class="quest-reward" data-panel="trials">메아리의 회랑 · 도전과 강화 ${icon('arrow')}</button>` : ''}${s.zone === 'forest' ? `<button class="side-story-link" data-panel="journal">${icon('book')}${s.journey.flags.includes('lyra') ? '리라 구조 완료' : '선택 이야기 · 약초사의 발자국'}</button>` : ''}`;
 }
 function drawMinimap() {
   if (!game) return;
@@ -114,14 +120,14 @@ function drawMinimap() {
   c.fillStyle = game.environment.dark ? '#2b373b' : '#344a36'; c.fillRect(-180, -180, 360, 360);
   c.strokeStyle = '#75816340'; c.lineWidth = 1;
   for (let i = -160; i <= 160; i += 40) { c.beginPath(); c.moveTo(i, -180); c.lineTo(i, 180); c.stroke(); c.beginPath(); c.moveTo(-180, i); c.lineTo(180, i); c.stroke(); }
-  if (game.environment.coast) {
+  if (game.environment.coast || game.environment.skytree) {
     c.fillStyle = game.environment.dark ? '#4c6270' : '#aaa487'; c.fillRect(-180, -180, 360, 360);
     c.fillStyle = '#4a7d87'; c.beginPath(); c.moveTo(-180, -180); c.lineTo(-88, -180);
     for (let z = -38; z <= 38; z++) c.lineTo((-16.7 + Math.sin(z * .06) * 2) * 4.7, z * 4.7);
     c.lineTo(-180, 180); c.closePath(); c.fill();
-    if (game.state.zone === 'wreck') {
+    if (game.state.zone === 'wreck' || game.state.zone === 'ruins') {
       c.fillRect(-180, -14, 360, 28);
-      if (game.state.journey.tide === 'low') { c.fillStyle = '#d4cbaa'; c.fillRect(-10, -19, 20, 38); }
+      if (game.state.zone === 'ruins' ? game.state.finale.flags.includes('bridge') : game.state.journey.tide === 'low') { c.fillStyle = '#d4cbaa'; c.fillRect(-10, -19, 20, 38); }
     }
     for (const obstacle of game.environment.obstacles) { c.fillStyle = '#637378'; c.beginPath(); c.arc(obstacle.x * 4.7, obstacle.z * 4.7, obstacle.radius * 4.7, 0, Math.PI * 2); c.fill(); }
   } else {
@@ -156,6 +162,8 @@ function handleEvent(e: GameEvent) {
   if (e.type === 'quest') toast('이야기 목표 달성! 오른쪽 퀘스트에서 보상을 받으세요.', true);
   if (e.type === 'interact') { if (e.landmark?.kind === 'shop') openPanel('shop'); else openPanel('dialogue'); }
   if (e.type === 'story') openPanel(game.storyResult?.workshop ? 'workshop' : 'story');
+  if (e.type === 'choice') { pendingChoice = undefined; openPanel('choice'); }
+  if (e.type === 'trial') openPanel('trials');
   if (e.type === 'death') openPanel('death');
   if (e.type === 'zone') updateZone();
   if (e.type === 'saved') { $('#save-warning').classList.toggle('hidden', game.saveAvailable); $('#save-warning').textContent = game.repository.locked && game.loadResult.status === 'blocked' ? '원본 보존 중 · 임시 플레이는 저장되지 않습니다' : '저장 불가 · 현재 모험은 임시 플레이입니다'; $('#save-status').innerHTML = `${icon(game.saveAvailable ? 'check' : 'help')} ${game.saveAvailable ? '자동 저장됨' : '저장 불가 · 임시 플레이'}`; }
@@ -165,7 +173,7 @@ function updateZone(announce = true) {
   $('#region-type').textContent = isSafeZone(game.state.zone) ? '평화로운 안식처' : game.state.zone === 'sanctum' ? '고대의 봉인지' : '모험 지역';
   $('.region-weather').innerHTML = game.environment.coast ? `${icon('drop')} ${game.environment.dark ? '별빛 아래' : '해안 바람'} <span>·</span> 새벽바다` : `${icon('sun')} 맑음 <span>·</span> 엘더우드 동부`;
   $('.safe-dot').classList.toggle('danger', !isSafeZone(game.state.zone));
-  $('#nameplate-layer').innerHTML = game.environment.landmarks.map(l => `<div class="world-nameplate ${l.kind === 'portal' ? 'portal-label' : ''}"><span>${l.kind === 'elder' ? '◆ 마을의 장로' : l.kind === 'shop' ? '◆ 여행자의 상인' : l.kind === 'seal' ? '◇ F · 봉인 장치' : l.kind === 'story' ? '◇ F · 조사 / 대화' : l.kind === 'resident' ? '◆ 돌아온 이웃' : '◇ 차원문'}</span><b>${l.kind === 'portal' ? ZONES[l.destination!].name : l.name}</b></div>`).join('');
+  $('#nameplate-layer').innerHTML = game.environment.landmarks.map(l => `<div class="world-nameplate ${l.kind === 'portal' ? 'portal-label' : ''}"><span>${l.kind === 'elder' ? '◆ 마을의 장로' : l.kind === 'shop' ? '◆ 여행자의 상인' : l.kind === 'seal' || l.kind === 'root' ? '◇ F · 공명 장치' : l.kind === 'story' || l.kind === 'finale' ? '◇ F · 조사 / 대화' : l.kind === 'resident' ? '◆ 돌아온 이웃' : '◇ 차원문'}</span><b>${l.kind === 'portal' ? ZONES[l.destination!].name : l.name}</b></div>`).join('');
   if (announce) { $('#zone-announcement span').textContent = z.english; $('#zone-announcement h2').textContent = z.name; $('#zone-announcement').classList.remove('hidden'); clearTimeout(zoneTimer); zoneTimer = setTimeout(() => $('#zone-announcement').classList.add('hidden'), 2800); }
 }
 
@@ -186,15 +194,15 @@ function openPanel(panel: string) {
   activePanel = panel; game.setPaused(true); $('#modal-backdrop').classList.remove('hidden');
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', (b as HTMLElement).dataset.panel === panel));
   const s = game.state;
-  if (panel === 'character') shell('YOUR ADVENTURER', '나의 캐릭터', `<div class="character-layout"><div class="character-portrait">${portrait}<span>Lv. ${s.level}</span></div><div><p class="character-class">${s.journey.step === 7 ? '숲과 바다의 수호자' : s.chapter === 6 ? '숲의 수호자' : '엘더우드의 여행자'}</p><h3>여행자</h3><p class="muted">작은 발걸음이, 숲의 운명을 바꿉니다.</p><div class="stats-grid"><div>${icon('heart')}<span>최대 체력</span><b>${maxHp(s)}</b></div><div>${icon('drop')}<span>최대 마력</span><b>${maxMp(s)}</b></div><div>${icon('sword')}<span>공격력</span><b>${attackPower(s)}</b></div><div>${icon('shield')}<span>방어력</span><b>${defense(s)}</b></div></div></div></div><div class="modal-section-title">배운 스킬 <span>레벨을 달성하면 자동으로 습득합니다</span></div><div class="skill-list">${SKILL_KEYS.map(k => [k, getSkill(s, k)] as const).map(([k, skill]) => `<div class="skill-detail ${s.level < skill.level ? 'unlearned' : ''}"><div class="detail-icon">${icon(skill.icon)}</div><div><b>${skill.name}</b><p>${skill.description}</p><small>MP ${skill.mana} · 재사용 ${skill.cooldown}초</small></div><span>${s.level < skill.level ? `Lv. ${skill.level} 해금` : `<kbd>${k.toUpperCase()}</kbd> 습득 완료`}</span></div>`).join('')}</div><p class="modal-footnote">다음 레벨까지 ${xpRequired(s.level) - s.xp} EXP · 총 ${s.totalKills}마리 해방 · 모험 시간 ${Math.floor(s.playTime / 60)}분</p>`, true);
+  if (panel === 'character') shell('YOUR ADVENTURER', '나의 캐릭터', `<div class="character-layout"><div class="character-portrait">${portrait}<span>Lv. ${s.level}</span></div><div><p class="character-class">${s.finale.step === 6 ? '별빛을 잇는 여행자' : s.journey.step === 7 ? '숲과 바다의 수호자' : s.chapter === 6 ? '숲의 수호자' : '엘더우드의 여행자'}</p><h3>여행자</h3><p class="muted">작은 발걸음이, 숲의 운명을 바꿉니다.</p><div class="stats-grid"><div>${icon('heart')}<span>최대 체력</span><b>${maxHp(s)}</b></div><div>${icon('drop')}<span>최대 마력</span><b>${maxMp(s)}</b></div><div>${icon('sword')}<span>공격력</span><b>${attackPower(s)}</b></div><div>${icon('shield')}<span>방어력</span><b>${defense(s)}</b></div></div></div></div><div class="modal-section-title">배운 스킬 <span>레벨을 달성하면 자동으로 습득합니다</span></div><div class="skill-list">${SKILL_KEYS.map(k => [k, getSkill(s, k)] as const).map(([k, skill]) => `<div class="skill-detail ${s.level < skill.level ? 'unlearned' : ''}"><div class="detail-icon">${icon(skill.icon)}</div><div><b>${skill.name}</b><p>${skill.description}</p><small>MP ${skill.mana} · 재사용 ${skill.cooldown}초</small></div><span>${s.level < skill.level ? `Lv. ${skill.level} 해금` : `<kbd>${k.toUpperCase()}</kbd> 습득 완료`}</span></div>`).join('')}</div><p class="modal-footnote">다음 레벨까지 ${xpRequired(s.level) - s.xp} EXP · 총 ${s.totalKills}마리 해방 · 모험 시간 ${Math.floor(s.playTime / 60)}분</p>`, true);
   else if (panel === 'inventory') shell('EQUIPMENT & INVENTORY', '장비와 가방', `<div class="inventory-summary"><span>${icon('bag')} 여행자의 소지품</span><b>${icon('coin')} ${s.gold.toLocaleString()} G</b></div><div class="equipment-grid">${s.ownedItems.map(id => {
     const item = ITEMS[id], w = WEAPONS[item.weapon], equipped = s.equipment[item.weapon] === id;
     const delta = item.attack - ITEMS[s.equipment[item.weapon]].attack;
-    return `<button class="equipment-card ${equipped ? 'equipped' : ''}" data-item="${id}"><span class="equipment-type">${w.type}<kbd>${['sword','spear','bow'].indexOf(item.weapon) + 1}</kbd></span><div class="equipment-art" style="color:${item.color}">${icon(w.icon)}</div><h3>${item.name}</h3><p>공격력 +${item.attack} · ${w.range}m${delta ? ` · ${delta > 0 ? '▲ +' : '▼ '}${delta}` : ''}</p><p class="item-effect">${item.description}</p><span class="equipment-status">${equipped ? `${icon('check')} ${s.weapon === item.weapon ? '사용 중' : '전환 시 장착'}` : '장착하기'}</span></button>`;
+    return `<button class="equipment-card ${equipped ? 'equipped' : ''}" data-item="${id}"><span class="equipment-type">${w.type}<kbd>${['sword','spear','bow'].indexOf(item.weapon) + 1}</kbd></span><div class="equipment-art" style="color:${item.color}">${icon(w.icon)}</div><h3>${item.name}${s.trials.forge[item.weapon] ? ` · 공명 +${s.trials.forge[item.weapon]}` : ''}</h3><p>공격력 +${item.attack + s.trials.forge[item.weapon] * 4} · ${w.range}m${delta ? ` · ${delta > 0 ? '▲ +' : '▼ '}${delta}` : ''}</p><p class="item-effect">${item.description}</p><span class="equipment-status">${equipped ? `${icon('check')} ${s.weapon === item.weapon ? '사용 중' : '전환 시 장착'}` : '장착하기'}</span></button>`;
   }).join('')}</div><div class="inventory-item"><span class="detail-icon">${icon('shield')}</span><div><b>${['여행자의 옷', '숲지기의 가죽 갑옷', '수호자의 사슬 갑옷', '별빛 기사 갑옷'][s.armor]}</b><p>체력 +${s.armor * 20} · 방어력 +${s.armor * 6}</p></div><span class="tag">장착 중</span></div><div class="inventory-item"><span class="detail-icon rose">${icon('potion')}</span><div><b>회복 물약 × ${s.potions}</b><p>최대 체력의 ${Math.round(60 * DIFFICULTIES[s.difficulty].healing)}% 회복 · 재사용 4초</p></div><kbd>H</kbd></div>${materialInventory(s)}<div class="panel-footer"><p>무기별로 장착한 아이템을 기억합니다. 고유 무기는 마을·항구 상점에서 구입하세요.</p><button class="secondary-button" data-shop-visit>${s.zone === 'harbor' || game.environment.coast ? '항구 상점' : '마을 상점'} ${icon('arrow')}</button></div>`, true);
   else if (panel === 'map') shell('EXPLORE ELDERWOOD', '세계 지도', worldMapHTML(s), true);
   else if (panel === 'journal') {
-    const q = currentQuest(s); shell('THE STORY SO FAR', '모험 일지', `<p class="journal-prologue">별이 떨어진 밤, 숲은 노래를 잃었습니다.<br>평범한 여행자였던 당신에게, 숲이 다시 말을 걸어옵니다.</p><div class="journal-current"><span class="chapter-label">${q.subtitle}</span><h3>${q.title}</h3><p>${q.description}</p><div class="objectives">${objectiveRows()}</div>${q.xp ? `<div class="reward-line">이야기 보상 <b>${q.xp} EXP</b><b>${q.gold} G</b><b>물약 × 2</b></div>` : ''}${(questReady(s) || journeyReady(s)) ? '<button class="primary-button" data-action="claim">보상 받고 다음 이야기로</button>' : ''}</div><div class="chapter-timeline">${CHAPTERS.slice(0, 6).map((q, i) => `<div class="${i < s.chapter ? 'done' : i === s.chapter ? 'current' : ''}"><span>${i < s.chapter ? icon('check') : String(i).padStart(2, '0')}</span><div><small>${q.subtitle}</small><b>${q.title}</b></div>${i > s.chapter ? icon('lock') : ''}</div>`).join('')}</div>${journeyJournalHTML(s)}`);
+    const q = currentQuest(s); shell('THE STORY SO FAR', '모험 일지', `<p class="journal-prologue">별이 떨어진 밤, 숲은 노래를 잃었습니다.<br>평범한 여행자였던 당신에게, 숲이 다시 말을 걸어옵니다.</p><div class="journal-current"><span class="chapter-label">${q.subtitle}</span><h3>${q.title}</h3><p>${q.description}</p><div class="objectives">${objectiveRows()}</div>${q.xp ? `<div class="reward-line">이야기 보상 <b>${q.xp} EXP</b><b>${q.gold} G</b><b>물약 × 2</b></div>` : ''}${(questReady(s) || journeyReady(s) || finaleReady(s)) ? '<button class="primary-button" data-action="claim">보상 받고 다음 이야기로</button>' : ''}</div><div class="chapter-timeline">${CHAPTERS.slice(0, 6).map((q, i) => `<div class="${i < s.chapter ? 'done' : i === s.chapter ? 'current' : ''}"><span>${i < s.chapter ? icon('check') : String(i).padStart(2, '0')}</span><div><small>${q.subtitle}</small><b>${q.title}</b></div>${i > s.chapter ? icon('lock') : ''}</div>`).join('')}</div>${journeyJournalHTML(s)}${finaleJournalHTML(s)}`);
   }
   else if (panel === 'graphics') shell('MAKE YOURSELF AT HOME', '화면과 카메라', `<p class="modal-intro">플레이 환경에 맞게 숲의 풍경과 시점을 조절하세요.</p><div class="modal-section-title">그래픽 품질 <span>현재 적용: ${QUALITY_NAMES[game.quality]}</span></div><div class="quality-options">${Object.entries(QUALITY_NAMES).map(([id, name]) => `<button data-quality="${id}" aria-pressed="${game.settings.quality === id}" class="${game.settings.quality === id ? 'selected' : ''}"><b>${name}</b><small>${({auto:'화면에 맞춰 선택',high:'선명한 그림자와 풍성한 풀',medium:'화질과 부드러움의 균형',low:'가벼운 화면과 간결한 풍경'} as Record<string,string>)[id]}</small></button>`).join('')}</div><div class="modal-section-title">피격 시 화면 흔들림</div><div class="shake-options">${[[0,'끔'],[.35,'약하게'],[.7,'보통']].map(([value,label]) => `<button data-shake="${value}" aria-pressed="${game.settings.shake === value}" class="${game.settings.shake === value ? 'selected' : ''}">${label}</button>`).join('')}</div><label class="display-toggle"><span><b>활 조준 확대</b><small>활 공격과 충전 중 대상을 조금 크게 보여줍니다.</small></span><input type="checkbox" data-display="aimZoom" ${game.settings.aimZoom ? 'checked' : ''}></label><label class="display-toggle"><span><b>풍경의 움직임</b><small>풀과 나뭇잎, 물결, 떠다니는 빛을 움직입니다.</small></span><input type="checkbox" data-display="ambientMotion" ${game.settings.ambientMotion ? 'checked' : ''}></label><p class="modal-footnote">화면 설정은 즉시 적용됩니다. 자동 품질은 작은 화면에서 낮음, 터치 화면에서 보통 또는 낮음을 선택합니다.</p><div class="panel-footer"><button class="text-button" data-reset-display>화면 설정 초기화</button><button class="primary-button" data-close>모험으로 돌아가기 ${icon('arrow')}</button></div>`);
   else if (panel === 'help' || panel === 'pause') shell('TAKE A BREATH', panel === 'pause' ? '잠시, 모닥불 곁에서' : '모험가 안내서', `<p class="modal-intro">메뉴를 여는 동안 모험은 잠시 멈춥니다.</p><div class="controls-list">${controls.map(([k, label]) => `<div><kbd>${k}</kbd><span>${label}</span></div>`).join('')}</div><p class="help-tip">${icon('leaf')} 붉은 원·부채꼴·직선은 실제 공격 범위입니다. Shift로 피하고, 위험할 때는 H로 물약을 사용하세요. 상어가 사라지면 푸른 물결 밖으로 피하세요. 활 R은 자동으로 모아 발사하며 회피나 무기 전환으로 취소됩니다. 취소해도 마력과 재사용 대기시간은 돌아오지 않습니다.</p><div class="modal-section-title">모험 난이도 <span>${isSafeZone(s.zone) ? '마을·항구에서 변경할 수 있습니다' : '마을·항구로 돌아가면 변경할 수 있습니다'}</span></div><div class="difficulty-options">${Object.entries(DIFFICULTIES).map(([id, d]) => `<button data-difficulty="${id}" class="${s.difficulty === id ? 'selected' : ''}" ${!isSafeZone(s.zone) ? 'disabled' : ''}><b>${d.name}</b><small>${d.description}</small></button>`).join('')}</div><p class="modal-footnote">경험치와 골드 보상은 모든 난이도에서 같습니다. 현재: ${DIFFICULTIES[s.difficulty].name}</p><button class="secondary-button display-menu" data-panel="graphics">${icon('sun')} 화면과 카메라 설정</button><div class="panel-footer"><button class="text-button" data-new-game>새 게임</button><button class="primary-button" data-close>모험으로 돌아가기 ${icon('arrow')}</button></div>`);
@@ -203,17 +211,19 @@ function openPanel(panel: string) {
     shell('ROWAN’S TRADING POST', s.zone === 'harbor' ? '항구의 보급 상점' : '로웬의 작은 상점', `<p class="dialogue-quote">“좋은 장비와 따뜻한 물약이면, 어떤 숲도 두렵지 않지.”</p><div class="inventory-summary"><span>소지금</span><b>${icon('coin')} ${s.gold} G</b></div><div class="shop-item"><div class="detail-icon rose">${icon('potion')}</div><div><h3>회복 물약</h3><p>체력 ${Math.round(60 * DIFFICULTIES[s.difficulty].healing)}% 회복 · 현재 ${s.potions}개</p></div><button class="secondary-button" data-buy-potion ${s.gold < 20 ? 'disabled' : ''}>20 G · 구입</button></div><div class="shop-item"><div class="detail-icon">${icon('shield')}</div><div><h3>${s.armor === 3 ? '별빛 기사 갑옷' : ['숲지기의 가죽 갑옷', '수호자의 사슬 갑옷', '별빛 기사 갑옷'][s.armor]}</h3><p>${s.armor === 3 ? '최고 단계의 갑옷을 장착하고 있습니다.' : '갑옷 강화 · 체력 +20, 방어력 +6'}</p></div><button class="secondary-button" data-buy-armor ${s.armor >= 3 || s.gold < 80 * (s.armor + 1) ? 'disabled' : ''}>${s.armor >= 3 ? '강화 완료' : `${80 * (s.armor + 1)} G · 장착`}</button></div><div class="modal-section-title">별의 파편으로 벼린 무기 <span>이야기 보상 수령 후 입고됩니다</span></div>${Object.entries(ITEMS).filter(([, item]) => item.price > 0).map(([id, item]) => {
       const owned = s.ownedItems.includes(id as ItemId), locked = s.chapter < item.chapter;
       const delta = item.attack - ITEMS[s.equipment[item.weapon]].attack;
-      return `<div class="shop-item"><div class="detail-icon" style="color:${item.color}">${icon(WEAPONS[item.weapon].icon)}</div><div><h3>${item.name}</h3><p>공격력 +${item.attack} · 현재 장비 대비 ${delta >= 0 ? '+' : ''}${delta}<br>${item.description}</p></div><button class="secondary-button" data-buy-item="${id}" ${owned || locked || s.gold < item.price ? 'disabled' : ''}>${owned ? '보유 중' : locked ? `${item.chapter - 1}장 완료 후` : `${item.price} G · 구입`}</button></div>`;
+      return `<div class="shop-item"><div class="detail-icon" style="color:${item.color}">${icon(WEAPONS[item.weapon].icon)}</div><div><h3>${item.name}${s.trials.forge[item.weapon] ? ` · 공명 +${s.trials.forge[item.weapon]}` : ''}</h3><p>공격력 +${item.attack + s.trials.forge[item.weapon] * 4} · 현재 장비 대비 ${delta >= 0 ? '+' : ''}${delta}<br>${item.description}</p></div><button class="secondary-button" data-buy-item="${id}" ${owned || locked || s.gold < item.price ? 'disabled' : ''}>${owned ? '보유 중' : locked ? `${item.chapter - 1}장 완료 후` : `${item.price} G · 구입`}</button></div>`;
     }).join('')}<p class="modal-footnote">구입한 무기는 가방에서 장착하세요. 물약은 H로 사용합니다. 구입한 갑옷은 즉시 장착됩니다.</p>`);
   }
+  else if (panel === 'trials') shell('HALL OF ECHOES', '메아리의 회랑', trialsHTML(s, game.activeTrial), true);
+  else if (panel === 'choice' || panel === 'choice-preview') { if (panel === 'choice') pendingChoice = undefined; shell('THE PROMISE YOU LEAVE', '빛을 맡길 곳', choiceHTML(pendingChoice), true); }
   else if (panel === 'workshop') shell('DORAN · SHIPWRIGHT', '도란의 작업대', workshopHTML(s), true);
   else if (panel === 'story') {
     const story = game.storyResult; if (!story) { closePanel(); return; }
-    shell('THE BLACK TIDE · A STORY TO REMEMBER', story.title, `<div class="dialogue-symbol">${icon('book')}</div><div class="dialogue-text">${story.text.map(t => `<p>${t}</p>`).join('')}</div><div class="dialogue-footer"><span>기록은 L 모험 일지에서 다시 볼 수 있습니다</span><button class="primary-button" data-close>계속하기 ${icon('arrow')}</button></div>`);
+    shell(s.finale.step ? 'ROOTS OF THE SKYTREE · A STORY TO REMEMBER' : 'THE BLACK TIDE · A STORY TO REMEMBER', story.title, `<div class="dialogue-symbol">${icon('book')}</div><div class="dialogue-text">${story.text.map(t => `<p>${t}</p>`).join('')}</div><div class="dialogue-footer"><span>기록은 L 모험 일지에서 다시 볼 수 있습니다</span><button class="primary-button" data-close>계속하기 ${icon('arrow')}</button></div>`);
   }
   else if (panel === 'dialogue') {
-    const text = s.chapter === 0 ? '어서 오게, 여행자. 얼마 전 별 하나가 숲 깊은 곳에 떨어졌지. 그날 이후 온순하던 동물들이 낯선 힘에 물들었다네.<br><br>먼저 <strong>속삭임의 숲</strong>으로 가보게. 다람쥐와 토끼를 저주에서 풀어주면, 숲도 자네에게 길을 보여줄 걸세.<br><br>자네의 검과 창, 활은 이미 가방에 넣어두었다네. 지도 <kbd>M</kbd>을 열면 숲으로 바로 갈 수 있지.' : s.chapter === 5 ? '돌아왔군, 숲의 수호자여. 바람에 다시 새들의 노래가 실려오는구나.<br><br>모르가스는 숲을 파괴하려던 것이 아니었어. 떨어지는 별의 저주를 홀로 막아내다가 그 자신이 물들고 말았던 거지.<br><br>자네가 구한 건 우리 마을만이 아니라네. 숲의 모든 생명, 그리고 마지막 용의 마음이라네. 고맙네.' : s.chapter === 6 ? (s.journey.step === 0 ? '자네가 돌아온 뒤, 강 하류에서 편지 한 통이 도착했다네. 새벽물결 항구의 배들이 검은 안개 속에서 사라진다는군.<br><br>모르가스가 홀로 막아낸 별의 저주는 아직 끝나지 않았어. 강을 따라 바다로 흘러간 파편이 또 다른 수호자를 잠식하고 있지.<br><br>선장 미라를 찾아가 주겠나? 그곳에도 돌아올 사람을 기다리는 이들이 있다네.' : s.journey.step === 7 ? '미라의 편지를 읽었네. 하늘과 바다의 수호자가 다시 제자리를 찾았군.<br><br>하늘나무… 언젠가 자네에게 말해야 할 이름이었지. 오늘은 돌아온 이들과 쉬게나. 나도 오랜 기억을 꺼낼 준비를 하겠네.' : '강은 바다로 이어지고, 바다는 다시 숲에 비를 돌려주지.<br><br>미라와 선원들을 부탁하네. 지금 할 일은 모험 일지에 기록되어 있을 걸세.') : `자네가 걸어온 길에서 조금씩 생명이 돌아오고 있네.<br><br>지금은 <strong>${ZONES[CHAPTERS[s.chapter].zone].name}</strong>에서 남은 흔적을 찾아주게. 위험하면 언제든 돌아오게나. 마을에서 쉬면 체력과 마력이 회복된다네.`;
-    shell('ELION · ELDER OF GREENHAVEN', '장로 엘리온', `<div class="dialogue-symbol">${icon('leaf')}</div><div class="dialogue-text">${text}</div><div class="dialogue-footer"><span>${s.chapter === 0 ? '별의 흔적을 따라, 첫걸음' : '숲은 언제나 당신과 함께합니다'}</span><button class="primary-button" ${s.chapter === 6 && s.journey.step === 0 ? 'data-begin-journey' : 'data-dialogue-continue'}>${s.chapter === 0 ? '숲을 도울게요' : s.chapter === 5 ? '이야기 마치기' : s.chapter === 6 && s.journey.step === 0 ? '항구를 도울게요' : '다시 만나요'} ${icon('arrow')}</button></div>`);
+    const text = s.chapter === 0 ? '어서 오게, 여행자. 얼마 전 별 하나가 숲 깊은 곳에 떨어졌지. 그날 이후 온순하던 동물들이 낯선 힘에 물들었다네.<br><br>먼저 <strong>속삭임의 숲</strong>으로 가보게. 다람쥐와 토끼를 저주에서 풀어주면, 숲도 자네에게 길을 보여줄 걸세.<br><br>자네의 검과 창, 활은 이미 가방에 넣어두었다네. 지도 <kbd>M</kbd>을 열면 숲으로 바로 갈 수 있지.' : s.chapter === 5 ? '돌아왔군, 숲의 수호자여. 바람에 다시 새들의 노래가 실려오는구나.<br><br>모르가스는 숲을 파괴하려던 것이 아니었어. 떨어지는 별의 저주를 홀로 막아내다가 그 자신이 물들고 말았던 거지.<br><br>자네가 구한 건 우리 마을만이 아니라네. 숲의 모든 생명, 그리고 마지막 용의 마음이라네. 고맙네.' : s.chapter === 6 ? (s.journey.step === 0 ? '자네가 돌아온 뒤, 강 하류에서 편지 한 통이 도착했다네. 새벽물결 항구의 배들이 검은 안개 속에서 사라진다는군.<br><br>모르가스가 홀로 막아낸 별의 저주는 아직 끝나지 않았어. 강을 따라 바다로 흘러간 파편이 또 다른 수호자를 잠식하고 있지.<br><br>선장 미라를 찾아가 주겠나? 그곳에도 돌아올 사람을 기다리는 이들이 있다네.' : s.journey.step === 7 ? elionFinaleText(s) : '강은 바다로 이어지고, 바다는 다시 숲에 비를 돌려주지.<br><br>미라와 선원들을 부탁하네. 지금 할 일은 모험 일지에 기록되어 있을 걸세.') : `자네가 걸어온 길에서 조금씩 생명이 돌아오고 있네.<br><br>지금은 <strong>${ZONES[CHAPTERS[s.chapter].zone].name}</strong>에서 남은 흔적을 찾아주게. 위험하면 언제든 돌아오게나. 마을에서 쉬면 체력과 마력이 회복된다네.`;
+    shell('ELION · ELDER OF GREENHAVEN', '장로 엘리온', `<div class="dialogue-symbol">${icon('leaf')}</div><div class="dialogue-text">${text}</div><div class="dialogue-footer"><span>${s.chapter === 0 ? '별의 흔적을 따라, 첫걸음' : '숲은 언제나 당신과 함께합니다'}</span><button class="primary-button" ${s.chapter === 6 && s.journey.step === 0 ? 'data-begin-journey' : s.journey.step === 7 && s.finale.step === 0 ? 'data-begin-finale' : 'data-dialogue-continue'}>${s.chapter === 0 ? '숲을 도울게요' : s.chapter === 5 ? '이야기 마치기' : s.chapter === 6 && s.journey.step === 0 ? '항구를 도울게요' : s.journey.step === 7 && s.finale.step === 0 ? '함께 하늘나무로 가요' : '다시 만나요'} ${icon('arrow')}</button></div>`);
   }
   else if (panel === 'death') { shell('A NEW DAWN AWAITS', '잠시 쉬어가도 괜찮아요', `<div class="death-symbol">${icon('camp')}</div><p class="dialogue-quote">${game.environment.coast ? '조수의 빛이 당신을 항구로 데려다줍니다.' : '숲의 정령이 당신을 마을로 데려다줍니다.'}<br>레벨과 장비, 퀘스트 진행 상황은 그대로 유지됩니다.</p><button class="primary-button centered" data-revive>${game.environment.coast ? '항구' : '마을'}에서 다시 일어나기 ${icon('arrow')}</button>`); $('.modal-close').classList.add('hidden'); }
   else if (panel === 'recovery') {
@@ -226,6 +236,14 @@ function openPanel(panel: string) {
 
 const chapterNarration = [ '', '동물들의 눈에 서려 있던 보랏빛이 걷혔습니다. 풀잎 사이에서 발견한 별의 파편이 거인의 들판을 향해 떨립니다.', '거인들이 다시 평온을 찾았습니다. 마지막 대지의 파편에 잠긴 신전으로 가는 길이 새겨져 있습니다. 물 아래에서 오래된 노래가 들려옵니다.', '물과 그림자의 봉인이 풀렸습니다. 모든 파편이 하나가 되어 고대 용의 안식처를 비춥니다. 저주의 중심에, 상처 입은 용이 기다립니다.', '모르가스를 감싸던 어둠이 흩어지고, 고대 용이 조용히 고개를 숙입니다. 잊힌 숲에 처음으로 햇살이 내려앉습니다. 이제 마을로 돌아갈 시간입니다.' ];
 function claimQuest() {
+  if (game.state.finale.step > 0) {
+    const s = game.state, step = s.finale.step, q = FINALE[step], level = s.level;
+    if (!completeFinale(s)) return;
+    game.killNotice = false; game.save(); game.refreshStory(); if (s.finale.step === 6 && isSafeZone(s.zone)) game.loadZone(s.zone); render(); game.sound.play('level');
+    activePanel = 'reward'; game.setPaused(true); $('#modal-backdrop').classList.remove('hidden');
+    shell('ROOTS OF THE SKYTREE', step === 5 ? CHOICES[s.finale.choice!].ending : '함께 이어 온 길', `<div class="reward-symbol">${icon('leaf')}</div><div class="dialogue-text">${(step === 5 ? endingText(s) : [q.ending]).map(t => `<p>${t}</p>`).join('')}</div><div class="reward-prizes"><div><b>+${q.xp}</b><span>경험치</span></div><div><b>+${q.gold}</b><span>골드</span></div><div><b>+2</b><span>회복 물약</span></div></div><button class="primary-button centered" ${step === 5 ? 'data-panel="trials"' : 'data-next-chapter'}>${step === 5 ? '엔딩 이후 · 메아리의 회랑' : '다음 여정으로'} ${icon('arrow')}</button>`);
+    modal.scrollTop = 0; modal.focus(); if (s.level > level) handleEvent({ type: 'level', text: `레벨 ${s.level}` }); return;
+  }
   if (game.state.chapter === 6) {
     const step = game.state.journey.step, q = JOURNEY[step], level = game.state.level;
     if (!completeJourney(game.state)) return;
@@ -252,6 +270,13 @@ document.addEventListener('click', event => {
   if (target.dataset.action === 'lock') game.toggleTargetLock();
   if (target.hasAttribute('data-close')) closePanel();
   if (target.hasAttribute('data-begin-journey')) { if (game.beginJourney()) { closePanel(); openPanel('map'); } else toast('그린헤이븐의 엘리온 가까이에서 편지를 받으세요.'); }
+  if (target.hasAttribute('data-begin-finale')) { if (game.beginFinale()) { closePanel(); openPanel('map'); } else toast('2막을 마친 뒤 마을의 엘리온 가까이에서 시작하세요.'); }
+  if (target.dataset.choicePreview && Object.hasOwn(CHOICES, target.dataset.choicePreview)) { pendingChoice = target.dataset.choicePreview as EndingChoice; openPanel('choice-preview'); }
+  if (target.dataset.choiceConfirm) { if (game.chooseEnding(target.dataset.choiceConfirm as EndingChoice)) { closePanel(); toast('약속을 기록했습니다. 일지에서 보상을 받고 마지막 수호자에게 가세요.', true); } }
+  if (target.dataset.trialStart) { if (game.startTrial(target.dataset.trialStart as TrialKind, Number(target.dataset.tier))) closePanel(); }
+  if (target.hasAttribute('data-trial-next')) { if (game.nextTrialWave()) closePanel(); }
+  if (target.hasAttribute('data-trial-claim')) { const reward = game.claimTrial(); if (reward) { toast(`도전 완료 · 공명의 인장 +${reward.marks} · ${reward.xp} EXP · ${reward.gold} G`, true); openPanel('trials'); } }
+  if (target.dataset.forge) { if (game.forge(target.dataset.forge as Weapon)) { render(); openPanel('trials'); } }
   if (target.dataset.craft) { game.craft(target.dataset.craft as RecipeId); openPanel('workshop'); }
   if (target.dataset.buyMaterial) { game.buyMaterial(target.dataset.buyMaterial as MaterialId); openPanel('workshop'); }
   if (target.dataset.item) { game.equip(target.dataset.item as ItemId); openPanel('inventory'); }
@@ -307,9 +332,11 @@ for (const button of document.querySelectorAll<HTMLElement>('[data-hold]')) {
   const release = () => { if (ready) game.keys.delete(button.dataset.hold!); }; button.addEventListener('pointerup', release); button.addEventListener('pointercancel', release);
 }
 
-// Defer scene creation by one frame so the loading view paints immediately.
-requestAnimationFrame(() => {
+// Paint the loading view independently of the engine download and scene construction.
+requestAnimationFrame(async () => {
   try {
+    const { Game } = await import('./game/engine');
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     game = new Game($('#world'), { update: render, event: handleEvent, float: floating }); ready = true;
     $('#welcome-card').classList.toggle('hidden', game.state.chapter > 0); $('#sound-btn').innerHTML = icon(game.state.muted ? 'muted' : 'sound'); $('#sound-btn').setAttribute('aria-label', game.state.muted ? '소리 켜기' : '소리 끄기');
     updateZone(false); render(); game.save(); if (game.loadResult.status === 'blocked') openPanel('recovery'); else if (game.state.hp <= 0) openPanel('death'); if (game.loadResult.message && game.loadResult.status !== 'blocked') toast(game.loadResult.message, game.loadResult.status === 'migrated'); $('#loading').classList.add('finished'); setTimeout(() => $('#loading').remove(), 600);

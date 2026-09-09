@@ -3,15 +3,19 @@ import { box, ico, cylinder, mesh, tree, house, batch } from './models';
 import type { Zone } from './state';
 import { STORY_SITES, newJourney, type JourneyState, type StoryId } from './journey-data';
 import { createCoast, refreshCoast } from './coast';
+import { createSkytree, addEndingWorld, refreshSkytree } from './skytree';
+import { newFinale, type FinaleState, type FinalSiteId } from './finale-data';
 
 export interface Obstacle { x: number; z: number; radius: number }
-export interface Landmark { x: number; z: number; name: string; kind: 'elder' | 'shop' | 'portal' | 'seal' | 'story' | 'resident'; destination?: Zone; index?: number; storyId?: StoryId; text?: string }
+export interface Landmark { x: number; z: number; name: string; kind: 'elder' | 'shop' | 'portal' | 'seal' | 'story' | 'resident' | 'finale' | 'root'; destination?: Zone; index?: number; storyId?: StoryId; finalId?: FinalSiteId; ending?: boolean; text?: string }
 export interface Environment { group: T.Group; obstacles: Obstacle[]; landmarks: Landmark[]; portal: T.Group; particles: T.Points; water: T.Mesh; dark: boolean; grass: T.InstancedMesh; grassCount: number; wind: { value: number }; foliageMaterials: T.Material[]; coast?: { zone: Zone; baseObstacles: Obstacle[]; barrier: T.Group; crossing: T.Group; tideWater: T.Mesh; beacon: T.Group; storyViews: Map<StoryId, T.Group> } }
+export interface Environment { skytree?: { zone: Zone; baseObstacles: Obstacle[]; barrier: T.Group; crossing: T.Group; storyViews: Map<FinalSiteId, T.Group> }; ending?: { renew: T.Group; release: T.Group } }
 export const terrainHeight = (x: number, z: number) => Math.sin(x * 0.14) * Math.cos(z * 0.13) * 0.24 + Math.sin(z * 0.19) * 0.12;
 export function random(seed: number) { let a = seed; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
-export function createEnvironment(zone: Zone, journey = newJourney()): Environment {
-  if (zone === 'harbor' || zone === 'wreck' || zone === 'abyss') return createCoast(zone, journey);
+export function createEnvironment(zone: Zone, journey = newJourney(), finale = newFinale()): Environment {
+  if (zone === 'ruins' || zone === 'roots' || zone === 'trial') return createSkytree(zone, finale);
+  if (zone === 'harbor' || zone === 'wreck' || zone === 'abyss') { const env = createCoast(zone, journey); addEndingWorld(env, zone); refreshSkytree(env, finale); return env; }
   const rng = random(8436 + Object.keys({ village: 0, forest: 1, plains: 2, depths: 3, sanctum: 4 }).indexOf(zone) * 831);
   const group = new T.Group(); const statics = new T.Group(); group.add(statics);
   const obstacles: Obstacle[] = []; const landmarks: Landmark[] = [];
@@ -115,7 +119,7 @@ export function createEnvironment(zone: Zone, journey = newJourney()): Environme
   box(statics, 2.4, 0.58, 1.3, 0xa4a58e, 0, 4.48, portalZ);
   const ring = new T.Mesh(new T.TorusGeometry(1.75, 0.055, 7, 50), new T.MeshBasicMaterial({ color: dark ? 0xbc9ce5 : 0xb9d9bb, transparent: true, opacity: 0.75 })); ring.position.y = 2.1; portal.add(ring);
   const veil = new T.Mesh(new T.CircleGeometry(1.7, 48), new T.MeshBasicMaterial({ color: dark ? 0x8974b8 : 0x82b7a4, transparent: true, opacity: 0.18, side: T.DoubleSide, depthWrite: false })); veil.position.y = 2.1; portal.add(veil);
-  const next: Record<Zone, Zone> = { village: 'forest', forest: 'plains', plains: 'depths', depths: 'sanctum', sanctum: 'village', harbor: 'wreck', wreck: 'abyss', abyss: 'harbor' };
+  const next: Partial<Record<Zone, Zone>> = { village: 'forest', forest: 'plains', plains: 'depths', depths: 'sanctum', sanctum: 'village', harbor: 'wreck', wreck: 'abyss', abyss: 'harbor' };
   landmarks.push({ x: 0, z: portalZ + 2, name: zone === 'sanctum' ? '그린헤이븐으로' : '다음 지역으로', kind: 'portal', destination: next[zone] });
   if (zone === 'forest') for (const id of ['herb', 'camp', 'lyra'] as const) {
     const site = STORY_SITES[id]; landmarks.push({ x: site.x, z: site.z, name: site.name, kind: 'story', storyId: id });
@@ -172,9 +176,10 @@ export function createEnvironment(zone: Zone, journey = newJourney()): Environme
   for (let i = 0; i < 100; i++) { particlePos[i * 3] = (rng() - 0.5) * 60; particlePos[i * 3 + 1] = 0.5 + rng() * 10; particlePos[i * 3 + 2] = (rng() - 0.5) * 60; }
   particleGeo.setAttribute('position', new T.BufferAttribute(particlePos, 3));
   const particles = new T.Points(particleGeo, new T.PointsMaterial({ color: dark ? 0xb8b1f1 : 0xffe5a5, size: 0.075, transparent: true, opacity: 0.72, depthWrite: false, blending: T.AdditiveBlending })); group.add(particles);
-  return { group, obstacles, landmarks, portal, particles, water, dark, grass, grassCount: actual, wind, foliageMaterials: [...foliage.values()] };
+  const env: Environment = { group, obstacles, landmarks, portal, particles, water, dark, grass, grassCount: actual, wind, foliageMaterials: [...foliage.values()] };
+  addEndingWorld(env, zone); refreshSkytree(env, finale); return env;
 }
-export { refreshCoast };
+export { refreshCoast, refreshSkytree };
 
 export function animateEnvironment(env: Environment, dt: number) {
   env.wind.value += dt; const time = env.wind.value;

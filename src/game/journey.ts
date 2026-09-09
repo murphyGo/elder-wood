@@ -1,9 +1,10 @@
 import { CHAPTERS, gainXp, type SaveState, type Zone, type ItemId } from './state';
 import { STORY_SITES, MATERIALS, addMaterials, RECIPES, JOURNEY, flagName, type StoryId, type StoryFlag, type RecipeId, type MaterialId, type Rune } from './journey-data';
 import { distance, type Point } from './geometry';
+import { FINALE } from './finale-data';
 export * from './journey-data';
 
-export const currentQuest = (s: SaveState) => s.chapter === 6 ? JOURNEY[s.journey.step] : CHAPTERS[s.chapter];
+export const currentQuest = (s: SaveState) => s.chapter === 6 ? s.journey.step === 7 && s.finale.step > 0 ? FINALE[s.finale.step] : s.journey.step === 7 ? { ...JOURNEY[7], zone: 'village' as const, description: '새벽을 되찾은 바다를 뒤로하고, 마을의 엘리온에게 마지막 여정을 받으세요.' } : JOURNEY[s.journey.step] : CHAPTERS[s.chapter];
 export const journeyReady = (s: SaveState) => s.chapter === 6 && JOURNEY[s.journey.step].objectives.length > 0 && JOURNEY[s.journey.step].objectives.every(f => s.journey.flags.includes(f));
 export const journeyRows = (s: SaveState) => JOURNEY[s.journey.step].objectives.map(flag => ({ name: flagName(flag), done: s.journey.flags.includes(flag) }));
 export function beginJourney(s: SaveState, position: Point) {

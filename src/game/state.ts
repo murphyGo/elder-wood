@@ -1,8 +1,10 @@
 import { newJourney, addMaterials, emptyMaterials, MATERIALS, STORY_FLAGS, DROPS, CRAFTED_ITEMS, type JourneyState, type MaterialId, type StoryFlag, type Rune } from './journey-data';
 import { WEAPONS, ITEMS, STARTER_ITEMS, DIFFICULTIES, getSkill, freshCooldowns, type Weapon, type Skill, type Difficulty, type ItemId, type Cooldowns } from './catalog';
+import { newFinale, FINAL_FLAGS, CHOICES, type FinaleState, type FinalFlag } from './finale-data';
+import { newTrials, TRIALS, type TrialProgress, type TrialKind } from './trial-data';
 export * from './catalog';
-export type Zone = 'village' | 'forest' | 'plains' | 'depths' | 'sanctum' | 'harbor' | 'wreck' | 'abyss';
-export type Species = 'squirrel' | 'rabbit' | 'cow' | 'horse' | 'hippo' | 'tiger' | 'shark' | 'dragon' | 'reef_shark' | 'leviathan';
+export type Zone = 'village' | 'forest' | 'plains' | 'depths' | 'sanctum' | 'harbor' | 'wreck' | 'abyss' | 'ruins' | 'roots' | 'trial';
+export type Species = 'squirrel' | 'rabbit' | 'cow' | 'horse' | 'hippo' | 'tiger' | 'shark' | 'dragon' | 'reef_shark' | 'leviathan' | 'thornbeast' | 'starwarden';
 
 export const MONSTERS: Record<Species, { name: string; level: number; hp: number; attack: number; xp: number; gold: number; speed: number; size: number; zone: Zone }> = {
   squirrel: { name: '물든 다람쥐', level: 1, hp: 36, attack: 4, xp: 22, gold: 8, speed: 2.8, size: 0.7, zone: 'forest' },
@@ -15,11 +17,13 @@ export const MONSTERS: Record<Species, { name: string; level: number; hp: number
   reef_shark: { name: '별에 물든 암초상어', level: 9, hp: 520, attack: 32, xp: 260, gold: 75, speed: 3.4, size: 1.65, zone: 'wreck' },
   leviathan: { name: '검은 조수의 네리스', level: 12, hp: 3800, attack: 58, xp: 1600, gold: 650, speed: 3, size: 2.8, zone: 'abyss' },
   dragon: { name: '고대룡 모르가스', level: 10, hp: 2800, attack: 48, xp: 800, gold: 500, speed: 2.5, size: 3.2, zone: 'sanctum' },
+  thornbeast: { name: '가시뿌리 수호수', level: 12, hp: 720, attack: 42, xp: 340, gold: 90, speed: 3.8, size: 1.5, zone: 'ruins' },
+  starwarden: { name: '별을 품은 아스테르', level: 16, hp: 5200, attack: 68, xp: 1900, gold: 800, speed: 2.6, size: 3, zone: 'roots' },
 };
 
 export const isSafeZone = (zone: Zone) => zone === 'village' || zone === 'harbor';
 export const isSeaShark = (species: Species) => ['shark', 'reef_shark', 'leviathan'].includes(species);
-export const isBoss = (species: Species) => species === 'dragon' || species === 'leviathan';
+export const isBoss = (species: Species) => species === 'dragon' || species === 'leviathan' || species === 'starwarden';
 
 export const ZONES: Record<Zone, { name: string; english: string; subtitle: string; level: number; chapter: number; color: string; creatures: Species[] }> = {
   village: { name: '그린헤이븐 마을', english: 'GREENHAVEN VILLAGE', subtitle: '모든 모험에는, 돌아올 곳이 필요하다.', level: 1, chapter: 0, color: '#abc4a0', creatures: [] },
@@ -30,6 +34,9 @@ export const ZONES: Record<Zone, { name: string; english: string; subtitle: stri
   harbor: { name: '새벽물결 항구', english: 'DAWNTIDE HARBOR', subtitle: '돌아오지 않은 배들을 기다리는 불빛.', level: 8, chapter: 6, color: '#b3d4ce', creatures: [] },
   wreck: { name: '별무덤 난파선', english: 'THE STARFALL WRECK', subtitle: '물이 물러나면, 잃어버린 발자국이 드러난다.', level: 8, chapter: 6, color: '#b8b3a0', creatures: ['reef_shark', 'tiger'] },
   abyss: { name: '검은 조수의 제단', english: 'ALTAR OF THE BLACK TIDE', subtitle: '바다의 심장은 아직 약속을 기억한다.', level: 10, chapter: 6, color: '#92c8d1', creatures: ['leviathan'] },
+  ruins: { name: '하늘나무의 기억', english: 'MEMORY OF THE SKYTREE', subtitle: '함께 걸어온 길이 마지막 문을 연다.', level: 12, chapter: 6, color: '#cbd7aa', creatures: ['thornbeast', 'tiger'] },
+  roots: { name: '별의 뿌리', english: 'ROOTS OF THE FIRST STAR', subtitle: '이제, 혼자 짊어지지 않아도 된다.', level: 13, chapter: 6, color: '#dfc78c', creatures: ['starwarden'] },
+  trial: { name: '메아리의 회랑', english: 'HALL OF ECHOES', subtitle: '기억 속 수호자들과 다시 마주하다.', level: 13, chapter: 6, color: '#b9b0d6', creatures: [] },
 };
 
 export const CHAPTERS: { title: string; subtitle: string; description: string; zone: Zone; objectives: Partial<Record<Species, number>>; xp: number; gold: number }[] = [
@@ -43,21 +50,23 @@ export const CHAPTERS: { title: string; subtitle: string; description: string; z
 ];
 
 export interface SaveState {
-  version: 3; name: string; level: number; xp: number; hp: number; mp: number; gold: number;
+  version: 4; name: string; level: number; xp: number; hp: number; mp: number; gold: number;
   weapon: Weapon; armor: number; potions: number; chapter: number;
   kills: Partial<Record<Species, number>>; zone: Zone; totalKills: number;
   journey: JourneyState; materials: Record<MaterialId, number>;
+  finale: FinaleState; trials: TrialProgress;
   muted: boolean; playTime: number; difficulty: Difficulty; ownedItems: ItemId[]; equipment: Record<Weapon, ItemId>; cooldowns: Cooldowns;
 }
 export const LEGACY_SAVE_KEY = 'elderwood-save-v1';
 export const PREVIOUS_SAVE_KEY = 'elderwood-save-v2';
-export const SAVE_KEY = 'elderwood-save-v3';
-export const newGame = (): SaveState => ({ version: 3, journey: newJourney(), materials: emptyMaterials(), name: '여행자', level: 1, xp: 0, hp: 100, mp: 60, gold: 60, weapon: 'sword', armor: 0, potions: 5, chapter: 0, kills: {}, zone: 'village', totalKills: 0, muted: false, playTime: 0, difficulty: 'adventure', ownedItems: Object.values(STARTER_ITEMS), equipment: { ...STARTER_ITEMS }, cooldowns: freshCooldowns() });
+export const THIRD_SAVE_KEY = 'elderwood-save-v3';
+export const SAVE_KEY = 'elderwood-save-v4';
+export const newGame = (): SaveState => ({ version: 4, journey: newJourney(), materials: emptyMaterials(), finale: newFinale(), trials: newTrials(), name: '여행자', level: 1, xp: 0, hp: 100, mp: 60, gold: 60, weapon: 'sword', armor: 0, potions: 5, chapter: 0, kills: {}, zone: 'village', totalKills: 0, muted: false, playTime: 0, difficulty: 'adventure', ownedItems: Object.values(STARTER_ITEMS), equipment: { ...STARTER_ITEMS }, cooldowns: freshCooldowns() });
 export const xpRequired = (level: number) => Math.floor(60 * Math.pow(level, 1.4));
 export const maxHp = (s: SaveState) => 100 + (s.level - 1) * 28 + s.armor * 20;
 export const maxMp = (s: SaveState) => 60 + (s.level - 1) * 12;
 export const equippedItem = (s: SaveState) => ITEMS[s.equipment[s.weapon]];
-export const attackPower = (s: SaveState) => 10 + (s.level - 1) * 5 + equippedItem(s).attack;
+export const attackPower = (s: SaveState) => 10 + (s.level - 1) * 5 + equippedItem(s).attack + s.trials.forge[s.weapon] * 4;
 export const mitigatedDamage = (raw: number, armor: number) => Math.max(1, Math.round(Math.max(0, raw) * 80 / (80 + Math.max(0, armor))));
 export function equipItem(s: SaveState, id: ItemId): boolean {
   if (!Object.hasOwn(ITEMS, id) || !s.ownedItems.includes(id)) return false;
@@ -80,6 +89,9 @@ export const canTravel = (s: SaveState, zone: Zone) => {
   if (zone === 'harbor') return s.journey.step >= 1;
   if (zone === 'wreck') return s.journey.step >= 3 && s.journey.flags.includes('lantern');
   if (zone === 'abyss') return s.journey.step >= 5 && s.journey.flags.includes('beacon');
+  if (zone === 'ruins') return s.journey.step === 7 && s.finale.step >= 1;
+  if (zone === 'roots') return s.finale.step >= 4 && s.finale.choice !== null;
+  if (zone === 'trial') return false; // Only a new, validated trial run can enter this instance.
   return true;
 };
 export const questReady = (s: SaveState) => {
@@ -102,6 +114,7 @@ export function recordKill(s: SaveState, species: Species) {
   s.gold += MONSTERS[species].gold;
   addMaterials(s.materials, DROPS[species]);
   if (species === 'leviathan' && s.journey.step === 5 && !s.journey.flags.includes('leviathan_freed')) s.journey.flags.push('leviathan_freed');
+  if (species === 'starwarden' && s.finale.step === 4 && !s.finale.flags.includes('aster_freed')) s.finale.flags.push('aster_freed');
   return gainXp(s, MONSTERS[species].xp);
 }
 export function completeQuest(s: SaveState) {
@@ -139,7 +152,7 @@ export function parseSave(raw: string | null): SaveState {
   if (!raw) return newGame();
   try {
     const value = JSON.parse(raw);
-    if (!value || typeof value !== 'object' || ![1, 2, 3].includes(value.version)) return newGame();
+    if (!value || typeof value !== 'object' || ![1, 2, 3, 4].includes(value.version)) return newGame();
     const s = newGame();
     const number = (key: keyof SaveState, min: number, max: number, fallback: number) => typeof value[key] === 'number' && Number.isFinite(value[key]) ? Math.max(min, Math.min(max, value[key])) : fallback;
     s.level = Math.floor(number('level', 1, 50, 1)); s.armor = Math.floor(number('armor', 0, 3, 0));
@@ -162,7 +175,7 @@ export function parseSave(raw: string | null): SaveState {
         if (typeof time === 'number' && Number.isFinite(time)) s.cooldowns[key] = Math.max(0, Math.min(60, time));
       }
     }
-    if (value.version === 3) {
+    if (value.version >= 3) {
       const j = value.journey;
       if (j && typeof j === 'object') {
         s.journey.step = s.chapter === 6 && Number.isInteger(j.step) ? Math.max(0, Math.min(7, j.step)) : 0;
@@ -172,6 +185,23 @@ export function parseSave(raw: string | null): SaveState {
       }
       for (const key of Object.keys(MATERIALS) as MaterialId[]) {
         const amount = value.materials?.[key]; if (typeof amount === 'number' && Number.isFinite(amount)) s.materials[key] = Math.floor(Math.max(0, Math.min(999999, amount)));
+      }
+    }
+    if (value.version === 4 && s.chapter === 6 && s.journey.step === 7) {
+      const f = value.finale;
+      if (f && Number.isInteger(f.step)) {
+        s.finale.step = Math.max(0, Math.min(6, f.step));
+        s.finale.flags = Array.isArray(f.flags) ? [...new Set(f.flags.filter((flag: unknown): flag is FinalFlag => typeof flag === 'string' && FINAL_FLAGS.includes(flag as FinalFlag)))] as FinalFlag[] : [];
+        s.finale.choice = Object.hasOwn(CHOICES, f.choice) ? f.choice : null;
+      }
+      if (s.finale.step === 6 && value.trials) {
+        const bounded = (v: unknown, cap: number) => typeof v === 'number' && Number.isFinite(v) ? Math.floor(Math.max(0, Math.min(cap, v))) : 0;
+        s.trials.marks = bounded(value.trials.marks, 999999);
+        for (const key of Object.keys(TRIALS) as TrialKind[]) {
+          s.trials.best[key] = bounded(value.trials.best?.[key], 3);
+          s.trials.clears[key] = bounded(value.trials.clears?.[key], 999999);
+        }
+        for (const w of Object.keys(WEAPONS) as Weapon[]) s.trials.forge[w] = bounded(value.trials.forge?.[w], 3);
       }
     }
     if (Object.hasOwn(ZONES, value.zone) && canTravel(s, value.zone)) s.zone = value.zone;

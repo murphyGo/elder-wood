@@ -1,5 +1,7 @@
-import { newGame, parseSave, SAVE_KEY, PREVIOUS_SAVE_KEY, LEGACY_SAVE_KEY, ITEMS, WEAPONS, ZONES, DIFFICULTIES, type Weapon, type ItemId, type SaveState } from './state';
+import { newGame, parseSave, SAVE_KEY, THIRD_SAVE_KEY, PREVIOUS_SAVE_KEY, LEGACY_SAVE_KEY, ITEMS, WEAPONS, ZONES, DIFFICULTIES, type Weapon, type ItemId, type SaveState } from './state';
 import { MATERIALS, STORY_FLAGS, JOURNEY } from './journey-data';
+import { CHOICES, FINALE, FINAL_FLAGS, FINAL_SITES } from './finale-data';
+import { TRIALS } from './trial-data';
 
 export interface StoragePort { getItem(key: string): string | null; setItem(key: string, value: string): void }
 export type LoadStatus = 'new' | 'loaded' | 'migrated' | 'blocked' | 'unavailable';
@@ -23,12 +25,31 @@ const validSave = (raw: string | null, version: number): SaveState | null => {
       }
       for (const key of Object.keys(newGame().cooldowns)) if (typeof value.cooldowns[key] !== 'number' || !Number.isFinite(value.cooldowns[key]) || value.cooldowns[key] < 0) return null;
     }
-    if (version === 3) {
+    if (version >= 3) {
       const j = value.journey;
       if (!j || !Number.isInteger(j.step) || j.step < 0 || j.step >= JOURNEY.length || (j.step > 0 && value.chapter !== 6) || !Array.isArray(j.flags) || j.flags.some((f: unknown) => typeof f !== 'string' || !STORY_FLAGS.includes(f)) || !Array.isArray(j.runes) || j.runes.length > 3 || !['high', 'low'].includes(j.tide)) return null;
       if (j.runes.some((r: unknown, i: number) => r !== ['shell', 'moon', 'star'][i]) || (j.tide === 'low' && !j.flags.includes('lantern'))) return null;
       if (JOURNEY.slice(1, j.step).some(q => q.objectives.some(f => !j.flags.includes(f)))) return null;
       for (const key of Object.keys(MATERIALS)) if (!Number.isInteger(value.materials?.[key]) || value.materials[key] < 0 || value.materials[key] > 999999) return null;
+    }
+    if (version === 4) {
+      const f = value.finale, t = value.trials;
+      if (!f || !Number.isInteger(f.step) || f.step < 0 || f.step >= FINALE.length || !Array.isArray(f.flags) || f.flags.some((flag: unknown) => typeof flag !== 'string' || !(FINAL_FLAGS as readonly string[]).includes(flag))) return null;
+      if (f.step > 0 && (value.chapter !== 6 || value.journey.step !== 7)) return null;
+      if (Object.entries(FINAL_SITES).some(([id, site]) => f.flags.includes(id) && f.step < site.step)) return null;
+      if (f.flags.includes('aster_freed') && f.step < 4 || f.flags.includes('home') && f.step < 5) return null;
+      if (f.choice !== null && !Object.hasOwn(CHOICES, f.choice)) return null;
+      if (f.flags.includes('choice') !== (f.choice !== null) || (f.choice !== null && f.step < 3)) return null;
+      if (FINALE.slice(1, f.step).some(q => q.objectives.some(flag => !f.flags.includes(flag)))) return null;
+      const bridge = ['elion_ally', 'earth_song', 'sea_song'].every(flag => f.flags.includes(flag));
+      if (f.flags.includes('bridge') !== bridge || (f.step >= 3 && !bridge)) return null;
+      const integer = (n: unknown, cap: number) => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= cap;
+      if (!t || !integer(t.marks, 999999)) return null;
+      for (const key of Object.keys(TRIALS)) {
+        if (!integer(t.best?.[key], 3) || !integer(t.clears?.[key], 999999) || t.clears[key] < t.best[key]) return null;
+      }
+      for (const w of Object.keys(WEAPONS)) if (!integer(t.forge?.[w], 3)) return null;
+      if (f.step !== 6 && (t.marks || Object.values(t.best).some(Boolean) || Object.values(t.clears).some(Boolean) || Object.values(t.forge).some(Boolean))) return null;
     }
     return parseSave(raw);
   } catch { return null; }
@@ -42,15 +63,16 @@ export class SaveRepository {
     if (!this.storage) return this.unavailable();
     try {
       const raw = this.storage.getItem(SAVE_KEY);
+      const thirdRaw = this.storage.getItem(THIRD_SAVE_KEY);
       const previousRaw = this.storage.getItem(PREVIOUS_SAVE_KEY);
       const old = this.storage.getItem(LEGACY_SAVE_KEY);
-      const current = validSave(raw, 3); const previous = validSave(previousRaw, 2); const original = validSave(old, 1); const legacy = previous ?? original;
+      const current = validSave(raw, 4); const third = validSave(thirdRaw, 3); const previous = validSave(previousRaw, 2); const original = validSave(old, 1); const legacy = third ?? previous ?? original;
       if (current) return { state: current, status: 'loaded', legacy, message: '' };
-      if (raw !== null || (previousRaw !== null && !previous) || (previousRaw === null && old !== null && !original)) {
+      if (raw !== null || (thirdRaw !== null && !third) || (thirdRaw === null && previousRaw !== null && !previous) || (thirdRaw === null && previousRaw === null && old !== null && !original)) {
         this.locked = true;
         return { state: legacy ?? newGame(), legacy, status: 'blocked', message: '저장 기록을 읽을 수 없습니다. 원본은 보존되어 있습니다. 복구 방법을 선택해주세요.' };
       }
-      if (legacy) return { state: legacy, legacy, status: 'migrated', message: previous ? '기존 장비와 진행을 그대로 이어갑니다. 1막 완료 후 엘리온에게 말을 걸면 항구 이야기가 시작됩니다.' : '기존 모험을 이어갑니다. 무기마다 Q/E/R이 달라지고 숲의 치유는 T로 이동했습니다.' };
+      if (legacy) return { state: legacy, legacy, status: 'migrated', message: third ? '기존 모험과 제작 장비를 이어갑니다. 검은 조수 이야기를 마친 뒤 엘리온을 만나면 최종장이 시작됩니다.' : previous ? '기존 장비와 진행을 그대로 이어갑니다. 1막 완료 후 엘리온에게 말을 걸면 항구 이야기가 시작됩니다.' : '기존 모험을 이어갑니다. 무기마다 Q/E/R이 달라지고 숲의 치유는 T로 이동했습니다.' };
       return { state: newGame(), legacy: null, status: 'new', message: '' };
     } catch { return this.unavailable(); }
   }

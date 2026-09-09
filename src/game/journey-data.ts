@@ -59,4 +59,4 @@ export const RECIPES = {
 } as const;
 export type RecipeId = keyof typeof RECIPES;
 export const CRAFTED_ITEMS: ItemId[] = ['tide_sword', 'tide_spear', 'tide_bow'];
-export const DROPS: Record<Species, Partial<Record<MaterialId, number>>> = { squirrel: { wood: 1 }, rabbit: { wood: 1 }, cow: { iron: 1 }, horse: { iron: 1 }, hippo: { iron: 2 }, tiger: { star: 1 }, shark: { star: 1 }, dragon: { star: 3 }, reef_shark: { iron: 1, star: 1 }, leviathan: { heart: 3, star: 3 } };
+export const DROPS: Record<Species, Partial<Record<MaterialId, number>>> = { squirrel: { wood: 1 }, rabbit: { wood: 1 }, cow: { iron: 1 }, horse: { iron: 1 }, hippo: { iron: 2 }, tiger: { star: 1 }, shark: { star: 1 }, dragon: { star: 3 }, reef_shark: { iron: 1, star: 1 }, leviathan: { heart: 3, star: 3 }, thornbeast: { wood: 2, star: 1 }, starwarden: { heart: 3, star: 5 } };
