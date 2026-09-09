@@ -21,6 +21,7 @@ export class Combat {
   projectiles: Projectile[] = [];
   events: CombatEvent[] = [];
   targetId?: number;
+  lockedTargetId?: number;
   cast?: Cast;
   parryTime = 0; parryItem: ItemId = 'traveler_sword'; parryPower = 0;
   dodgeTime = 0; dodgeYaw = 0; shield = 0; shieldTime = 0; combatTime = 0;
@@ -51,7 +52,8 @@ export class Combat {
   nearest(range: number) { return this.enemies.filter(e => e.hp > 0 && distance(e.pos, this.player) <= range + this.radius(e.species)).sort((a, b) => distance(a.pos, this.player) - distance(b.pos, this.player))[0]; }
   private aim(range: number): number {
     const selected = this.enemies.find(e => e.id === this.targetId && e.hp > 0 && distance(e.pos, this.player) <= range + this.radius(e.species));
-    const target = selected ?? this.nearest(range);
+    const locked = this.enemies.find(e => e.id === this.lockedTargetId && e.hp > 0 && distance(e.pos, this.player) <= 26);
+    const target = locked ?? selected ?? this.nearest(range);
     if (target) { this.targetId = target.id; this.facing = angleTo(this.player, target.pos); }
     return this.facing;
   }

@@ -4,7 +4,7 @@ import type { Zone } from './state';
 
 export interface Obstacle { x: number; z: number; radius: number }
 export interface Landmark { x: number; z: number; name: string; kind: 'elder' | 'shop' | 'portal' | 'seal'; destination?: Zone; index?: number }
-export interface Environment { group: T.Group; obstacles: Obstacle[]; landmarks: Landmark[]; portal: T.Group; particles: T.Points; water: T.Mesh; dark: boolean }
+export interface Environment { group: T.Group; obstacles: Obstacle[]; landmarks: Landmark[]; portal: T.Group; particles: T.Points; water: T.Mesh; dark: boolean; grass: T.InstancedMesh; grassCount: number; wind: { value: number }; foliageMaterials: T.Material[] }
 export const terrainHeight = (x: number, z: number) => Math.sin(x * 0.14) * Math.cos(z * 0.13) * 0.24 + Math.sin(z * 0.19) * 0.12;
 export function random(seed: number) { let a = seed; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
@@ -42,7 +42,8 @@ export function createEnvironment(zone: Zone): Environment {
     const x = Math.sin(angle) * radius; const z = Math.cos(angle) * radius;
     if (village && x < -7 && z < 10 && z > -13) continue;
     if (dark) {
-      const rock = ico(statics, 3 + rng() * 5, zone === 'sanctum' ? 0x4e495b : 0x55676a, x, 1, z, 0); rock.scale.set(1, 1 + rng() * 1.8, 1);
+      const rockRadius = 3 + rng() * 5;
+      const rock = ico(statics, radius < 34 ? 2.5 : rockRadius, zone === 'sanctum' ? 0x4e495b : 0x55676a, x, 1, z, 0); rock.scale.set(1, 1 + rng() * 1.8, 1);
       if (i % 5 === 0) { const crystal = mesh(statics, new T.OctahedronGeometry(2), zone === 'sanctum' ? 0xa18dbd : 0x8fbcba, x, 2, z, 0x284750); crystal.scale.set(0.4, 2, 0.4); }
     } else tree(statics, x, terrainHeight(x, z), z, 0.7 + rng() * 1.3, i % 4 === 0, i % 5);
     if (radius < 34) obstacles.push({ x, z, radius: dark ? 2.5 : 0.6 });
@@ -138,12 +139,45 @@ export function createEnvironment(zone: Zone): Environment {
     const mountain = mesh(statics, new T.ConeGeometry(16 + rng() * 13, h, 5), dark ? 0x4d5667 : 0x8baba0, Math.sin(a) * r, h / 2 - 6, Math.cos(a) * r);
     mountain.rotation.y = rng() * 6;
   }
+  const wind = { value: 0 }; const foliage = new Map<T.Material, T.MeshStandardMaterial>();
+  statics.traverse(o => {
+    if (!(o instanceof T.Mesh) || !o.userData.foliage || Array.isArray(o.material)) return;
+    let animated = foliage.get(o.material);
+    if (!animated) {
+      animated = (o.material as T.MeshStandardMaterial).clone();
+      animated.onBeforeCompile = shader => {
+        shader.uniforms.elderWind = wind;
+        shader.vertexShader = 'uniform float elderWind;\n' + shader.vertexShader;
+        shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.x += sin(elderWind * 1.1 + position.x * .35 + position.z * .27) * .08 * smoothstep(2.0, 7.0, position.y);');
+      };
+      animated.customProgramCacheKey = () => 'elderwood-leaves-v1'; foliage.set(o.material, animated);
+    }
+    o.material = animated;
+  });
+  (grass.material as T.MeshStandardMaterial).onBeforeCompile = shader => {
+    shader.uniforms.elderWind = wind;
+    shader.vertexShader = 'uniform float elderWind;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.x += sin(elderWind * 1.8 + instanceMatrix[3].x * .5 + instanceMatrix[3].z * .3) * max(0.0, position.y) * .18;');
+  };
+  (grass.material as T.MeshStandardMaterial).customProgramCacheKey = () => 'elderwood-grass-v1';
   batch(statics);
   const particleGeo = new T.BufferGeometry(); const particlePos = new Float32Array(100 * 3);
   for (let i = 0; i < 100; i++) { particlePos[i * 3] = (rng() - 0.5) * 60; particlePos[i * 3 + 1] = 0.5 + rng() * 10; particlePos[i * 3 + 2] = (rng() - 0.5) * 60; }
   particleGeo.setAttribute('position', new T.BufferAttribute(particlePos, 3));
   const particles = new T.Points(particleGeo, new T.PointsMaterial({ color: dark ? 0xb8b1f1 : 0xffe5a5, size: 0.075, transparent: true, opacity: 0.72, depthWrite: false, blending: T.AdditiveBlending })); group.add(particles);
-  return { group, obstacles, landmarks, portal, particles, water, dark };
+  return { group, obstacles, landmarks, portal, particles, water, dark, grass, grassCount: actual, wind, foliageMaterials: [...foliage.values()] };
+}
+
+export function animateEnvironment(env: Environment, dt: number) {
+  env.wind.value += dt; const time = env.wind.value;
+  const water = env.water.geometry.attributes.position;
+  for (let i = 0; i < water.count; i++) water.setY(i, Math.sin(water.getZ(i) * 2 - time * 1.8) * .035 + Math.sin(water.getX(i) * 1.4 + time) * .025);
+  water.needsUpdate = true; env.water.geometry.computeVertexNormals();
+  const particles = env.particles.geometry.attributes.position;
+  for (let i = 0; i < particles.count; i++) { particles.setY(i, (particles.getY(i) + dt * .13) % 11); particles.setX(i, particles.getX(i) + Math.sin(time * .4 + i) * dt * .04); }
+  particles.needsUpdate = true;
+  env.portal.children[0].rotation.z = Math.sin(time * .4) * .1;
+  (env.portal.children[1] as T.Mesh<T.BufferGeometry, T.MeshBasicMaterial>).material.opacity = .15 + Math.sin(time * 2) * .05;
 }
 
 export function disposeEnvironment(env: Environment) {
@@ -151,5 +185,6 @@ export function disposeEnvironment(env: Environment) {
   // Shared model materials remain cached; environment-only materials are released.
   for (const child of env.group.children) if ((child instanceof T.Mesh || child instanceof T.Points) && !Array.isArray(child.material)) child.material.dispose();
   env.portal.traverse(o => { if (o instanceof T.Mesh && !Array.isArray(o.material)) o.material.dispose(); });
+  env.foliageMaterials.forEach(m => m.dispose());
   env.group.removeFromParent();
 }

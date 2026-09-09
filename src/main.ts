@@ -2,6 +2,7 @@ import './style.css';
 import { Vector3 } from 'three';
 import { Game, type GameEvent } from './game/engine';
 import { CHAPTERS, WEAPONS, SKILL_KEYS, getSkill, ITEMS, DIFFICULTIES, equippedItem, buyItem, setDifficulty, ZONES, MONSTERS, maxHp, maxMp, xpRequired, attackPower, defense, canTravel, questReady, completeQuest, buyPotion, upgradeArmor, newGame, type Zone, type Weapon, type Skill, type Species, type ItemId, type Difficulty } from './game/state';
+import { QUALITY_NAMES, type Quality } from './game/settings';
 import { icon, portrait } from './icons';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -15,7 +16,7 @@ app.innerHTML = `
   <main id="hud" aria-label="게임 상태">
     <section class="player-card"><button class="portrait" data-panel="character" aria-label="캐릭터 정보">${portrait}<span id="level-badge">1</span></button><div class="player-vitals"><div class="player-name">여행자 <span id="player-title">새로운 모험가</span></div><div class="vital hp"><span>${icon('heart')}</span><div class="meter"><i id="hp-fill"></i><span id="hp-text">100 / 100</span></div></div><div class="vital mp"><span>${icon('drop')}</span><div class="meter"><i id="mp-fill"></i><span id="mp-text">60 / 60</span></div></div><div class="player-meta"><span>Lv. <b id="player-level">1</b></span><span>${icon('coin')} <b id="gold">60</b></span></div></div></section>
     <div class="compass-strip"><span>W</span><i></i><span>NW</span><i></i><b id="compass-heading">N</b><i></i><span>NE</span><i></i><span>E</span><div class="compass-pointer">◆</div></div>
-    <div id="target-card" class="target-card hidden"></div>
+    <div id="target-card" class="target-card hidden"></div><button id="target-lock" class="target-lock" data-action="lock" aria-pressed="false"><kbd>X</kbd><span>대상 고정</span></button>
     <aside class="right-hud"><button class="minimap" data-panel="map" aria-label="세계 지도 열기"><span class="map-north">N</span><canvas id="minimap-canvas" width="360" height="360"></canvas><span class="map-expand">${icon('fullscreen')}</span><span class="map-time">${icon('sun')} 09:41</span></button><div class="map-caption"><i class="safe-dot"></i><span id="zone-short">그린헤이븐</span><kbd>M</kbd></div>
     <section class="quest-tracker"><div class="section-eyebrow">${icon('book')} 메인 이야기 <button class="icon-button" data-panel="journal" aria-label="퀘스트 일지">${icon('chevron')}</button></div><div id="quest-content"></div></section></aside>
     <section class="region-caption"><div class="region-eyebrow"><span id="region-type">평화로운 안식처</span><i></i><span id="region-level">권장 Lv. 1</span></div><h1 id="region-title">그린헤이븐 마을</h1><p id="region-subtitle">모든 모험에는, 돌아올 곳이 필요하다.</p><div class="region-weather">${icon('sun')} 맑음 <span>·</span> 엘더우드 동부</div></section>
@@ -25,7 +26,7 @@ app.innerHTML = `
     <div id="zone-announcement" class="zone-announcement hidden"><span></span><h2></h2></div>
     <div id="nameplate-layer" class="nameplate-layer"></div><div id="float-layer" class="float-layer"></div><div id="toasts" class="toasts" role="status" aria-live="polite"></div>
     <section class="combat-hud"><div class="weapon-indicator">${icon('sword')}<span id="weapon-name">여행자의 검</span><span class="weapon-switch">1 / 2 / 3 <span>무기 전환</span></span></div><div class="skillbar"><button class="skill-slot basic" data-action="attack" aria-label="기본 공격 J"><kbd>J</kbd><span class="skill-symbol">${icon('sword')}</span><span class="skill-name">기본 공격</span></button><span class="slot-divider"></span>${SKILL_KEYS.map(k => `<button class="skill-slot" data-skill="${k}" aria-label="${getSkill(newGame(), k).name} ${k.toUpperCase()}"><kbd>${k.toUpperCase()}</kbd><span class="skill-symbol">${icon(getSkill(newGame(), k).icon)}</span><span class="skill-name">${getSkill(newGame(), k).name}</span><span class="skill-overlay" id="cooldown-${k}"></span><span class="skill-lock" id="lock-${k}">Lv. ${getSkill(newGame(), k).level}</span></button>`).join('')}<span class="slot-divider"></span><button class="skill-slot potion-slot" data-action="potion" aria-label="회복 물약 H"><kbd>H</kbd><span class="skill-symbol">${icon('potion')}</span><span id="potion-count" class="item-count">5</span><span class="skill-name">회복 물약</span></button></div><div class="xp-row"><span id="xp-level">Lv. 1</span><div class="xp-track"><i id="xp-fill"></i></div><span id="xp-text">0 / 60 EXP</span></div></section>
-    <div class="quick-actions"><button data-panel="journal">${icon('book')}<span>퀘스트 일지</span><kbd>L</kbd></button><button data-panel="help">${icon('help')}<span>조작 방법</span><kbd>?</kbd></button></div>
+    <div class="quick-actions"><button data-panel="graphics">${icon('sun')}<span>화면 설정</span></button><button data-panel="journal">${icon('book')}<span>퀘스트 일지</span><kbd>L</kbd></button><button data-panel="help">${icon('help')}<span>조작 방법</span><kbd>?</kbd></button></div>
   </main>
   <div id="save-warning" class="save-warning hidden" role="status"></div>
   <footer class="bottom-bar"><div class="controls-hint"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</span><i></i><span>마우스 우클릭 드래그 <em>시점 회전</em></span><i></i><span><kbd>Shift</kbd> 회피</span><span><kbd>Space</kbd> 점프</span><span><kbd>F</kbd> 상호작용</span></div><span id="save-status">${icon('check')} 자동 저장됨</span></footer>
@@ -38,7 +39,7 @@ const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.qu
 let game: Game; let activePanel = ''; let ready = false; let previousFocus: HTMLElement | null = null; let questSignature = ''; let levelTimer: ReturnType<typeof setTimeout>; let zoneTimer: ReturnType<typeof setTimeout>;
 const mm = $('#minimap-canvas') as HTMLCanvasElement; const ctx = mm.getContext('2d')!;
 const floats: { element: HTMLElement; position: Vector3; start: number }[] = [];
-const controls = [['W A S D / 방향키', '캐릭터 이동'], ['마우스 우클릭 드래그', '카메라 회전'], ['마우스 휠', '화면 확대 / 축소'], ['J / 마우스 좌클릭', '기본 공격 (누르고 있으면 연속 공격)'], ['Tab', '공격 대상 변경'], ['Q / E / R', '장착 무기의 전용 스킬 · Lv. 2 / 3 / 5 해금'], ['T', '숲의 치유 · Lv. 3 해금'], ['1 / 2 / 3', '검 / 창 / 활 장착'], ['Shift', '이동 방향으로 회피 · 회피 중 무적'], ['Space', '점프'], ['H', '회복 물약'], ['F', 'NPC 대화 / 차원문 이동 / 용의 봉인 작동'], ['C / I / M / L', '캐릭터 / 가방 / 지도 / 일지'], ['Esc', '메뉴 · 일시 정지 / 창 닫기']];
+const controls = [['W A S D / 방향키', '캐릭터 이동'], ['마우스 우클릭 드래그', '카메라 회전'], ['마우스 휠', '화면 확대 / 축소'], ['J / 마우스 좌클릭', '기본 공격 (누르고 있으면 연속 공격)'], ['Tab / X', '공격 대상 변경 / 대상 고정·해제'], ['터치 화면 드래그', '카메라 회전 · 이동과 공격은 화면 버튼'], ['Q / E / R', '장착 무기의 전용 스킬 · Lv. 2 / 3 / 5 해금'], ['T', '숲의 치유 · Lv. 3 해금'], ['1 / 2 / 3', '검 / 창 / 활 장착'], ['Shift', '이동 방향으로 회피 · 회피 중 무적'], ['Space', '점프'], ['H', '회복 물약'], ['F', 'NPC 대화 / 차원문 이동 / 용의 봉인 작동'], ['C / I / M / L', '캐릭터 / 가방 / 지도 / 일지'], ['Esc', '메뉴 · 일시 정지 / 창 닫기']];
 
 function render() {
   if (!ready) return;
@@ -68,6 +69,9 @@ function render() {
   }
   const target = game.target ?? game.enemies.find(e => e.species === 'dragon' && e.hp > 0); $('#target-card').classList.toggle('hidden', !target || target.hp <= 0);
   if (target && target.hp > 0) { const data = MONSTERS[target.species]; $('#target-card').innerHTML = `<span>Lv. ${data.level}</span><b>${data.name}</b><div class="enemy-health"><i style="width:${target.hp / target.maxHp * 100}%"></i></div><small>${Math.ceil(target.hp)} / ${target.maxHp}</small><p class="enemy-status">${target.species === 'dragon' ? `${game.battle.practice ? '연습전 · ' : ''}${target.bossPhase}단계 · ${target.bossPhase === 3 ? game.battle.exposure > 0 ? `보호막 해제 ${Math.ceil(game.battle.exposure)}초` : '봉인 근처에서 F' : target.airborne ? '비행 중 · 착지 대기' : '지상 전투'}` : target.telegraph?.label ?? (target.mode === 'recover' ? '빈틈 · 공격 기회' : '')}${target.slow > 0 ? ' · 둔화' : ''}${target.burn ? ' · 화상' : ''}${target.weakened > 0 ? ' · 약화' : ''}</p>`; }
+  $('#target-lock').setAttribute('aria-pressed', String(!!game.lockedTarget));
+  $('#target-lock span').textContent = game.lockedTarget ? '고정 해제' : '대상 고정';
+  $('#target-lock').classList.toggle('hidden', game.state.zone === 'village');
   $('#interaction').classList.toggle('hidden', !game.nearby || game.paused);
   if (game.nearby) $('#interaction span').textContent = game.nearby.kind === 'portal' ? `${ZONES[game.nearby.destination!].name} 이동` : game.nearby.kind === 'seal' ? `${game.nearby.name} 작동${game.battle.sealCooldowns[game.nearby.index!] > 0 ? ` · ${Math.ceil(game.battle.sealCooldowns[game.nearby.index!])}초` : ''}` : `${game.nearby.name}와 대화`;
   const signature = `${s.chapter}:${JSON.stringify(s.kills)}:${s.zone}`;
@@ -161,6 +165,7 @@ function openPanel(panel: string) {
   if ((activePanel === 'death' || activePanel === 'recovery') && panel !== activePanel) return;
   if (panel === 'adventure') { closePanel(); return; }
   if (!activePanel) previousFocus = document.activeElement as HTMLElement;
+  const previousPanel = activePanel;
   activePanel = panel; game.setPaused(true); $('#modal-backdrop').classList.remove('hidden');
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', (b as HTMLElement).dataset.panel === panel));
   const s = game.state;
@@ -174,7 +179,8 @@ function openPanel(panel: string) {
   else if (panel === 'journal') {
     const q = CHAPTERS[s.chapter]; shell('THE STORY SO FAR', '모험 일지', `<p class="journal-prologue">별이 떨어진 밤, 숲은 노래를 잃었습니다.<br>평범한 여행자였던 당신에게, 숲이 다시 말을 걸어옵니다.</p><div class="journal-current"><span class="chapter-label">${q.subtitle}</span><h3>${q.title}</h3><p>${q.description}</p><div class="objectives">${objectiveRows()}</div>${q.xp ? `<div class="reward-line">이야기 보상 <b>${q.xp} EXP</b><b>${q.gold} G</b><b>물약 × 2</b></div>` : ''}${questReady(s) ? '<button class="primary-button" data-action="claim">보상 받고 다음 이야기로</button>' : ''}</div><div class="chapter-timeline">${CHAPTERS.slice(0, 6).map((q, i) => `<div class="${i < s.chapter ? 'done' : i === s.chapter ? 'current' : ''}"><span>${i < s.chapter ? icon('check') : String(i).padStart(2, '0')}</span><div><small>${q.subtitle}</small><b>${q.title}</b></div>${i > s.chapter ? icon('lock') : ''}</div>`).join('')}</div>`);
   }
-  else if (panel === 'help' || panel === 'pause') shell('TAKE A BREATH', panel === 'pause' ? '잠시, 모닥불 곁에서' : '모험가 안내서', `<p class="modal-intro">메뉴를 여는 동안 모험은 잠시 멈춥니다.</p><div class="controls-list">${controls.map(([k, label]) => `<div><kbd>${k}</kbd><span>${label}</span></div>`).join('')}</div><p class="help-tip">${icon('leaf')} 붉은 원·부채꼴·직선은 실제 공격 범위입니다. Shift로 피하고, 위험할 때는 H로 물약을 사용하세요. 상어가 사라지면 푸른 물결 밖으로 피하세요. 활 R은 자동으로 모아 발사하며 회피나 무기 전환으로 취소됩니다. 취소해도 마력과 재사용 대기시간은 돌아오지 않습니다.</p><div class="modal-section-title">모험 난이도 <span>${s.zone === 'village' ? '마을에서 변경할 수 있습니다' : '마을로 돌아가면 변경할 수 있습니다'}</span></div><div class="difficulty-options">${Object.entries(DIFFICULTIES).map(([id, d]) => `<button data-difficulty="${id}" class="${s.difficulty === id ? 'selected' : ''}" ${s.zone !== 'village' ? 'disabled' : ''}><b>${d.name}</b><small>${d.description}</small></button>`).join('')}</div><p class="modal-footnote">경험치와 골드 보상은 모든 난이도에서 같습니다. 현재: ${DIFFICULTIES[s.difficulty].name}</p><div class="panel-footer"><button class="text-button" data-new-game>새 게임</button><button class="primary-button" data-close>모험으로 돌아가기 ${icon('arrow')}</button></div>`);
+  else if (panel === 'graphics') shell('MAKE YOURSELF AT HOME', '화면과 카메라', `<p class="modal-intro">플레이 환경에 맞게 숲의 풍경과 시점을 조절하세요.</p><div class="modal-section-title">그래픽 품질 <span>현재 적용: ${QUALITY_NAMES[game.quality]}</span></div><div class="quality-options">${Object.entries(QUALITY_NAMES).map(([id, name]) => `<button data-quality="${id}" aria-pressed="${game.settings.quality === id}" class="${game.settings.quality === id ? 'selected' : ''}"><b>${name}</b><small>${({auto:'화면에 맞춰 선택',high:'선명한 그림자와 풍성한 풀',medium:'화질과 부드러움의 균형',low:'가벼운 화면과 간결한 풍경'} as Record<string,string>)[id]}</small></button>`).join('')}</div><div class="modal-section-title">피격 시 화면 흔들림</div><div class="shake-options">${[[0,'끔'],[.35,'약하게'],[.7,'보통']].map(([value,label]) => `<button data-shake="${value}" aria-pressed="${game.settings.shake === value}" class="${game.settings.shake === value ? 'selected' : ''}">${label}</button>`).join('')}</div><label class="display-toggle"><span><b>활 조준 확대</b><small>활 공격과 충전 중 대상을 조금 크게 보여줍니다.</small></span><input type="checkbox" data-display="aimZoom" ${game.settings.aimZoom ? 'checked' : ''}></label><label class="display-toggle"><span><b>풍경의 움직임</b><small>풀과 나뭇잎, 물결, 떠다니는 빛을 움직입니다.</small></span><input type="checkbox" data-display="ambientMotion" ${game.settings.ambientMotion ? 'checked' : ''}></label><p class="modal-footnote">화면 설정은 즉시 적용됩니다. 자동 품질은 작은 화면에서 낮음, 터치 화면에서 보통 또는 낮음을 선택합니다.</p><div class="panel-footer"><button class="text-button" data-reset-display>화면 설정 초기화</button><button class="primary-button" data-close>모험으로 돌아가기 ${icon('arrow')}</button></div>`);
+  else if (panel === 'help' || panel === 'pause') shell('TAKE A BREATH', panel === 'pause' ? '잠시, 모닥불 곁에서' : '모험가 안내서', `<p class="modal-intro">메뉴를 여는 동안 모험은 잠시 멈춥니다.</p><div class="controls-list">${controls.map(([k, label]) => `<div><kbd>${k}</kbd><span>${label}</span></div>`).join('')}</div><p class="help-tip">${icon('leaf')} 붉은 원·부채꼴·직선은 실제 공격 범위입니다. Shift로 피하고, 위험할 때는 H로 물약을 사용하세요. 상어가 사라지면 푸른 물결 밖으로 피하세요. 활 R은 자동으로 모아 발사하며 회피나 무기 전환으로 취소됩니다. 취소해도 마력과 재사용 대기시간은 돌아오지 않습니다.</p><div class="modal-section-title">모험 난이도 <span>${s.zone === 'village' ? '마을에서 변경할 수 있습니다' : '마을로 돌아가면 변경할 수 있습니다'}</span></div><div class="difficulty-options">${Object.entries(DIFFICULTIES).map(([id, d]) => `<button data-difficulty="${id}" class="${s.difficulty === id ? 'selected' : ''}" ${s.zone !== 'village' ? 'disabled' : ''}><b>${d.name}</b><small>${d.description}</small></button>`).join('')}</div><p class="modal-footnote">경험치와 골드 보상은 모든 난이도에서 같습니다. 현재: ${DIFFICULTIES[s.difficulty].name}</p><button class="secondary-button display-menu" data-panel="graphics">${icon('sun')} 화면과 카메라 설정</button><div class="panel-footer"><button class="text-button" data-new-game>새 게임</button><button class="primary-button" data-close>모험으로 돌아가기 ${icon('arrow')}</button></div>`);
   else if (panel === 'shop') {
     if (s.zone !== 'village') { closePanel(); game.toast('그린헤이븐 마을에서 상인을 만나세요.'); return; }
     shell('ROWAN’S TRADING POST', '로웬의 작은 상점', `<p class="dialogue-quote">“좋은 장비와 따뜻한 물약이면, 어떤 숲도 두렵지 않지.”</p><div class="inventory-summary"><span>소지금</span><b>${icon('coin')} ${s.gold} G</b></div><div class="shop-item"><div class="detail-icon rose">${icon('potion')}</div><div><h3>회복 물약</h3><p>체력 ${Math.round(60 * DIFFICULTIES[s.difficulty].healing)}% 회복 · 현재 ${s.potions}개</p></div><button class="secondary-button" data-buy-potion ${s.gold < 20 ? 'disabled' : ''}>20 G · 구입</button></div><div class="shop-item"><div class="detail-icon">${icon('shield')}</div><div><h3>${s.armor === 3 ? '별빛 기사 갑옷' : ['숲지기의 가죽 갑옷', '수호자의 사슬 갑옷', '별빛 기사 갑옷'][s.armor]}</h3><p>${s.armor === 3 ? '최고 단계의 갑옷을 장착하고 있습니다.' : '갑옷 강화 · 체력 +20, 방어력 +6'}</p></div><button class="secondary-button" data-buy-armor ${s.armor >= 3 || s.gold < 80 * (s.armor + 1) ? 'disabled' : ''}>${s.armor >= 3 ? '강화 완료' : `${80 * (s.armor + 1)} G · 장착`}</button></div><div class="modal-section-title">별의 파편으로 벼린 무기 <span>이야기 보상 수령 후 입고됩니다</span></div>${Object.entries(ITEMS).filter(([, item]) => item.price > 0).map(([id, item]) => {
@@ -192,6 +198,7 @@ function openPanel(panel: string) {
     shell('YOUR JOURNEY IS SAFE', '저장 기록 복구', `<p class="modal-intro">${game.loadResult.message}</p><p class="help-tip">복구 전에 읽을 수 없는 기록의 사본을 보관합니다. 이전 버전의 저장은 그대로 유지됩니다.</p><div class="recovery-options">${game.loadResult.legacy ? '<button class="primary-button" data-recover="legacy">이전 버전의 모험 복구</button>' : ''}<button class="secondary-button" data-recover="new">원본 보관 후 새 모험 시작</button><button class="text-button" data-recover="temporary">저장 없이 임시 플레이</button></div>`); $('.modal-close').classList.add('hidden');
   }
   else if (panel === 'new-game') shell('BEGIN AGAIN', '새로운 여행을 시작할까요?', `<p class="dialogue-quote">현재 캐릭터의 레벨, 장비, 이야기와 저장 기록이 초기화됩니다.</p><div class="panel-footer"><button class="secondary-button" data-panel="pause">돌아가기</button><button class="primary-button" data-confirm-new>새 게임 시작</button></div>`);
+  if (previousPanel !== panel) modal.scrollTop = 0;
   modal.focus({ preventScroll: true });
 }
 
@@ -209,6 +216,10 @@ document.addEventListener('click', event => {
   const target = (event.target as Element).closest<HTMLElement>('button, a.brand, [data-travel]'); if (!target || !ready || (target instanceof HTMLButtonElement && target.disabled)) return;
   if (target.matches('a.brand')) { event.preventDefault(); closePanel(); }
   if (target.dataset.panel) openPanel(target.dataset.panel);
+  if (target.dataset.quality) { game.setDisplay({ quality: target.dataset.quality as Quality }); openPanel('graphics'); }
+  if (target.dataset.shake !== undefined) { game.setDisplay({ shake: Number(target.dataset.shake) }); openPanel('graphics'); }
+  if (target.hasAttribute('data-reset-display')) { game.resetDisplay(); openPanel('graphics'); }
+  if (target.dataset.action === 'lock') game.toggleTargetLock();
   if (target.hasAttribute('data-close')) closePanel();
   if (target.dataset.item) { game.equip(target.dataset.item as ItemId); openPanel('inventory'); }
   if (target.dataset.travel) { const zone = target.dataset.travel as Zone; if (!canTravel(game.state, zone)) { game.toast('이야기를 진행하고 권장 레벨을 달성하면 열립니다.'); return; } closePanel(); game.travel(zone); $('#welcome-card').classList.add('hidden'); }
@@ -237,6 +248,10 @@ document.addEventListener('click', event => {
   }
   if (target.id === 'sound-btn') { game.state.muted = !game.state.muted; game.sound.muted = game.state.muted; target.innerHTML = icon(game.state.muted ? 'muted' : 'sound'); target.setAttribute('aria-label', game.state.muted ? '소리 켜기' : '소리 끄기'); game.save(); if (!game.state.muted) game.sound.play('click'); }
   if (target.id === 'fullscreen-btn') { const action = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); action?.catch(() => toast('이 브라우저에서는 전체 화면을 사용할 수 없습니다.')); }
+});
+document.addEventListener('change', e => {
+  const input = e.target; if (!(input instanceof HTMLInputElement) || !ready) return;
+  if (input.dataset.display === 'aimZoom' || input.dataset.display === 'ambientMotion') game.setDisplay({ [input.dataset.display]: input.checked });
 });
 $('#modal-backdrop').addEventListener('click', e => { if (e.target === $('#modal-backdrop')) closePanel(); });
 document.addEventListener('keydown', e => {

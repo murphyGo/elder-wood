@@ -28,3 +28,22 @@
 @media(max-width:650px){.combat-hud{width:min(354px,calc(100vw - 22px))}.skill-slot{flex:1 1 0;min-width:0;width:auto}.skillbar{gap:5px;padding:8px 6px 19px}.slot-divider{flex:0 0 1px;margin:0}.skill-name{font-size:6.5px;letter-spacing:-.35px}.skill-symbol>.icon{width:23px;height:23px}.equipment-card .item-effect{font-size:8px;min-height:75px}.equipment-grid{grid-template-columns:repeat(2,1fr)}.equipment-art{height:64px}.difficulty-options{grid-template-columns:1fr}.difficulty-options button{padding:9px 12px}.difficulty-options small{margin-top:2px}.save-warning{bottom:29px;font-size:8px;max-width:250px;right:8px;padding:6px 9px}.target-card{top:88px}.enemy-status{font-size:8px}}
 @media(max-width:650px){.target-card{top:200px;left:16px;transform:none;width:190px;text-align:left}.target-card small{text-align:right}.enemy-status{font-size:9px;color:#f2d5a2}.skill-slot[data-skill="r"] .skill-name{font-size:6px;letter-spacing:-.5px}}
 @media(max-width:650px) and (pointer:coarse){.interaction{bottom:241px}}
+/* Display preferences remain available in the pause menu on every screen size. */
+.quality-options { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:14px 0 24px; }
+.quality-options button,.shake-options button { border:1px solid #c5bc983b; background:#243c34; color:#d9decb; padding:14px; border-radius:9px; text-align:left; cursor:pointer; }
+.quality-options button small { display:block; margin-top:6px; color:#a5b5a5; font-size:12px; line-height:1.5; }
+.quality-options .selected,.shake-options .selected { border-color:#d1bb81; background:#3c4d3b; }
+.shake-options { display:flex; gap:10px; margin:14px 0 22px; }
+.shake-options button { flex:1; text-align:center; }
+.display-toggle { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:18px 0; border-top:1px solid #c5bc9820; cursor:pointer; }
+.display-toggle small { display:block; color:#a5b5a5; font-size:12px; margin-top:7px; line-height:1.6; }
+.display-toggle input { accent-color:#d4bd86; width:20px; height:20px; flex-shrink:0; }
+.display-menu { width:100%; margin-top:20px; }
+.target-lock { position:absolute; top:194px; left:50%; transform:translateX(-50%); pointer-events:auto; display:flex; align-items:center; gap:8px; border:1px solid #c7bc8b55; border-radius:20px; padding:6px 12px; background:#20392ed9; color:#dfdcc6; font-size:11px; cursor:pointer; }
+.target-lock[aria-pressed="true"] { border-color:#dfc78e; background:#4d5941ed; }
+#game-canvas { touch-action:none; }
+@media(max-width:700px) {
+  .target-lock { top:212px; right:12px; left:auto; transform:none; padding:9px 12px; }
+  .target-lock kbd { display:none; }
+  .quality-options button { padding:12px; }
+}
