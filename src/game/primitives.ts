@@ -37,4 +37,3 @@ export function batch(group: T.Group) {
   }
   originals.forEach(g => g.dispose());
 }
-
